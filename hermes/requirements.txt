@@ -1,0 +1,20 @@
+# Google APIs (Gmail + Sheets)
+google-api-python-client>=2.100
+google-auth>=2.23
+google-auth-oauthlib>=1.1
+google-auth-httplib2>=0.2
+
+# LLM — OpenAI SDK works for OpenAI AND GLM/Zhipu via base_url override
+openai>=1.40
+
+# PDF text extraction (image/scanned POs fall back to LLM vision)
+pdfplumber>=0.11
+
+# Fuzzy customer-name / line matching
+rapidfuzz>=3.9
+
+# Config + env
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Odoo uses the stdlib xmlrpc.client — no dependency needed

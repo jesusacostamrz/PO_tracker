@@ -1,0 +1,28 @@
+# --- Secrets: never commit real credentials ---
+.env
+*.env
+!*.env.example
+!*.env.local.example
+.secrets/
+*.token.json
+gmail_token.json
+credentials.json
+service_account*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- Runtime / state ---
+*.log
+logs/
+state/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini

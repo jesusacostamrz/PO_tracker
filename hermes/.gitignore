@@ -1,0 +1,18 @@
+# Secrets — never commit
+.secrets/
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Runtime
+*.log
+logs/
+state/
+*.token.json
+gmail_token.json

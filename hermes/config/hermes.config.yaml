@@ -1,0 +1,67 @@
+# Hermes configuration ("Configuration C").
+# Secrets are NOT here — they come from .secrets/.env via ${VAR} substitution.
+
+company:                              # who WE are — the SUPPLIER on every customer PO
+  legal_name: UNICONTROL Y GABINETES DEL PACIFICO S DE RL DE CV
+  rfc: UGP230914LI2
+  aka: [Unicontrol, Unicontrol y Gabinetes del Pacifico]
+
+gmail:
+  account: pounicontrol@gmail.com
+  oauth_client_path: ./.secrets/google_oauth_client.json   # OAuth Desktop client JSON
+  token_path: ./.secrets/gmail_token.json                  # minted on first consent
+  poll_query: "is:unread has:attachment filename:pdf -label:Hermes/Processed -label:Hermes/NeedsReview"
+  labels:
+    processed: Hermes/Processed
+    needs_review: Hermes/NeedsReview
+
+odoo:
+  url: https://unicontrol.odoo.com
+  db: unicontrol
+  username: ${ODOO_USERNAME}        # Unicontrolbot login email
+  api_key_env: ODOO_API_KEY         # value lives in .secrets/.env
+
+sheets:
+  spreadsheet_id: ${SHEETS_SPREADSHEET_ID}
+  service_account_path: ./.secrets/google_service_account.json
+  tabs:
+    orders: Orders
+    dashboard: Dashboard
+    people: Salespeople
+    audit: Audit
+
+llm:
+  # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.
+  base_url: ${LLM_BASE_URL}         # OpenAI: https://api.openai.com/v1
+                                    # GLM:    https://open.bigmodel.cn/api/paas/v4
+  api_key_env: LLM_API_KEY
+  model: ${LLM_MODEL}               # text model, e.g. gpt-4o-mini / glm-4.6
+  vision_model: ${LLM_VISION_MODEL} # for scanned/image POs, e.g. gpt-4o / glm-4v
+
+matching:
+  candidate_states: [draft, sent]
+  lookback_days: 120
+  amount_tolerance_pct: 0.5         # tight: only near-exact totals auto-match; else Needs-review
+  compare: untaxed_total
+  confidence_threshold: 0.85        # >= confident; else Needs-review
+
+write:                              # Odoo write on confident match
+  customer_ref_field: client_order_ref
+  attach_pdf: true
+  post_chatter_note: true
+  po_in_terms: true                 # append "PO Cliente: <po#>" to the quote's T&C (note)
+  auto_confirm_so: false            # annotate only — NEVER confirm
+
+invoice:
+  detect_from: invoice_status
+  require_human_confirm: true       # hybrid close
+
+reminders:
+  daily_digest_time: "07:00"
+  timezone: America/Tijuana
+  manager_rollup_to: []
+  weekly_dashboard_refresh: "Mon 06:30"
+
+runtime:
+  dry_run: true                     # start safe: log intended actions, write nothing
+  log_level: INFO
