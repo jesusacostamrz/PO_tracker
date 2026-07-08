@@ -73,6 +73,12 @@ class ProjectOdooClient(OdooClient):
         """Write vals onto one project.task. Mirrors OdooClient.set_client_order_ref."""
         return self.execute("project.task", "write", [task_id], vals)
 
+    def create_project(self, name: str) -> int:
+        return self.execute("project.project", "create", {"name": name})
+
+    def create_task(self, vals: dict) -> int:
+        return self.execute("project.task", "create", vals)
+
     def notify_task(self, task_id: int, body: str, partner_ids: list[int]) -> int:
         """Post an internal note on the task and notify the given partners (Odoo emails them).
 
