@@ -69,6 +69,22 @@ class TestPlanToChart(unittest.TestCase):
     def test_today_line_within_range(self):
         self.assertIsNotNone(plan_to_chart(_plan()).today_left)
 
+    def test_rows_interleaved_in_date_order(self):
+        # A milestone dated between the two phase starts must sit between them,
+        # not be pushed below every phase.
+        plan = CustomerPlan(
+            project_name="X",
+            phases=[
+                PhaseBar("A", "#111", date(2026, 7, 1), date(2026, 7, 20), 0.0, False),
+                PhaseBar("B", "#222", date(2026, 8, 1), date(2026, 8, 20), 0.0, False),
+            ],
+            milestones=[MilestoneMark("Gate", date(2026, 7, 25), False)],
+            date_min=date(2026, 7, 1), date_max=date(2026, 8, 20),
+            as_of=date(2026, 7, 1), overall_progress=0.0,
+        )
+        kinds = [(r.kind, r.label) for r in plan_to_chart(plan).rows]
+        self.assertEqual([k for k, _ in kinds], ["phase", "milestone", "phase"])
+
 
 class TestRenderCustomerPage(unittest.TestCase):
     def test_self_contained_and_leak_safe(self):
@@ -83,6 +99,49 @@ class TestRenderCustomerPage(unittest.TestCase):
         # the browser-tab title should be the project, not the template artifact's title
         html = render_customer_page(_plan())
         self.assertIn("<title>Trabajo Cliente X</title>", html)
+
+
+class TestInternalRender(unittest.TestCase):
+    def _iplan(self):
+        from uc.core.internal_view import InternalPlan, InternalRow
+        return InternalPlan(
+            project_name="Proj",
+            rows=[
+                InternalRow("Diseño", "phase", 0, date(2026, 7, 1), date(2026, 7, 20),
+                            40.0, "#3f7cac", False, variance_days=5,
+                            baseline_end=date(2026, 7, 15)),
+                InternalRow("Modelado", "step", 1, date(2026, 7, 1), date(2026, 7, 10),
+                            100.0, "#3f7cac", True, variance_days=-2,
+                            baseline_end=date(2026, 7, 12)),
+                InternalRow("Nuevo", "step", 1, date(2026, 7, 3), date(2026, 7, 6),
+                            0.0, "#3f7cac", False, variance_days=None),
+                InternalRow("Aprobado", "milestone", 0, date(2026, 7, 25), date(2026, 7, 25),
+                            0.0, "", False, reached=False, variance_days=0,
+                            baseline_end=date(2026, 7, 25)),
+            ],
+            date_min=date(2026, 7, 1), date_max=date(2026, 7, 25),
+            as_of=date(2026, 7, 15), overall_progress=40.0,
+            overall_variance_days=5, approved_on=date(2026, 7, 8),
+        )
+
+    def test_variance_tags_and_indent(self):
+        from uc.render.gantt_html import render_internal_page
+        html = render_internal_page(self._iplan())
+        self.assertIn('class="vtag late"', html)      # +5d phase
+        self.assertIn("+5d", html)
+        self.assertIn('class="vtag early"', html)      # -2d step
+        self.assertIn('class="vtag new"', html)        # nuevo (no baseline)
+        self.assertIn("nuevo", html)
+        self.assertIn("padding-left:32px", html)       # indent=1 -> 12+20
+        self.assertIn('class="row step"', html)
+        self.assertIn('class="btick"', html)           # baseline tick
+        self.assertIn("Uso interno", html)
+        self.assertIn("Atraso de <b>5 d</b>", html)
+
+    def test_internal_uses_full_detail(self):
+        from uc.render.gantt_html import render_internal_page
+        html = render_internal_page(self._iplan())
+        self.assertIn("Modelado", html)  # child step IS shown (unlike customer view)
 
 
 if __name__ == "__main__":

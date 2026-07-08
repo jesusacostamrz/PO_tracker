@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from uc.core.customer_view import CustomerPlan
+from uc.core.internal_view import InternalPlan
 from uc.core.palette import ACCENT
 
 MONTHS = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
@@ -34,6 +35,12 @@ class Row:
     wbs: str = ""              # WBS code shown before the name (template only)
     name_title: str = ""       # tooltip for the name span; defaults to label
     mark_title: str = ""       # tooltip for the bar/milestone mark; defaults to label
+    # --- internal view only (all default so template/customer output is unchanged) ---
+    row_class: str = ""        # extra class on the row div (e.g. "phase" | "step")
+    indent: int = 0            # child-step indentation level
+    variance_label: str = ""   # e.g. "+5d" | "-2d" | "±0" | "nuevo"
+    variance_kind: str = ""    # "late" | "early" | "ontime" | "new" -> tag color
+    baseline_end_left: float | None = None   # % position of a baseline end-tick
 
 
 @dataclass
@@ -123,10 +130,14 @@ def _row_html(r: Row) -> str:
     name_title = esc(r.name_title) if r.name_title else esc(r.label)
     label = f'{dot}{wbs}<span class="tname" title="{name_title}">{esc(r.label)}</span>'
     mark_title = esc(r.mark_title) if r.mark_title else esc(r.label)
+    tick = (f'<span class="btick" style="left:{r.baseline_end_left:.3f}%"></span>'
+            if r.baseline_end_left is not None else "")
+    vtag = (f'<span class="vtag {r.variance_kind}">{esc(r.variance_label)}</span>'
+            if r.variance_label else "")
     if r.kind == "milestone":
         cls = "ms" + (" crit" if r.crit else "") + (" reached" if r.reached else "")
         mark = f'<span class="{cls}" style="left:{r.left:.3f}%" title="{mark_title}"></span>'
-        track = f'<div class="track">{mark}</div>'
+        track = f'<div class="track">{tick}{mark}{vtag}</div>'
     else:
         cls = "bar" + (" crit" if r.crit else "") + (" lead" if r.lead else "")
         fill = (f'<i class="fill" style="width:{max(0.0, min(r.progress, 100)):.1f}%"></i>'
@@ -134,8 +145,10 @@ def _row_html(r: Row) -> str:
         inlabel = f'<span class="durlbl">{esc(r.dur_label)}</span>' if r.dur_label else ""
         bar = (f'<div class="{cls}" style="left:{r.left:.3f}%;width:{r.width:.3f}%;--c:{r.color}" '
                f'title="{mark_title}">{fill}{inlabel}</div>')
-        track = f'<div class="track">{bar}</div>'
-    return f'<div class="row"><div class="rlabel">{label}</div>{track}</div>'
+        track = f'<div class="track">{tick}{bar}{vtag}</div>'
+    row_cls = f"row {r.row_class}" if r.row_class else "row"
+    rlabel_attr = f' style="padding-left:{12 + r.indent * 20}px"' if r.indent else ""
+    return f'<div class="{row_cls}"><div class="rlabel"{rlabel_attr}>{label}</div>{track}</div>'
 
 
 def render_chart(chart: Chart) -> str:
@@ -181,16 +194,21 @@ def _pct(day, dmin, span_days: int) -> float:
 
 def plan_to_chart(plan: CustomerPlan) -> Chart:
     span = max((plan.date_max - plan.date_min).days, 1)
-    rows: list[Row] = []
+    # Phases and milestones share one chronological order: a milestone that marks the
+    # end of a phase sits right after that phase's bar. Sort key is the row's date;
+    # ties keep the phase bar above the milestone diamond (kind rank 0 vs 1).
+    items: list[tuple] = []
     for ph in plan.phases:
         left = _pct(ph.start, plan.date_min, span)
         width = max(_pct(ph.end, plan.date_min, span) - left, 0.9)
-        rows.append(Row(label=ph.name, kind="phase", left=left, width=width,
-                        color=ph.color, progress=ph.progress))
+        items.append((ph.start, 0, Row(label=ph.name, kind="phase", left=left, width=width,
+                                        color=ph.color, progress=ph.progress)))
     for m in plan.milestones:
-        rows.append(Row(label=f"{m.name}  ({fmt_date(m.day)})", kind="milestone",
-                        left=_pct(m.day, plan.date_min, span), color=ACCENT,
-                        reached=m.reached))
+        items.append((m.day, 1, Row(label=f"{m.name}  ({fmt_date(m.day)})", kind="milestone",
+                                     left=_pct(m.day, plan.date_min, span), color=ACCENT,
+                                     reached=m.reached)))
+    items.sort(key=lambda it: (it[0], it[1]))
+    rows: list[Row] = [it[2] for it in items]
     today_left = (_pct(plan.as_of, plan.date_min, span)
                   if plan.date_min <= plan.as_of <= plan.date_max else None)
     step = 7 / span * 100
@@ -216,3 +234,108 @@ def render_customer_page(plan: CustomerPlan) -> str:
     )
     return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_CUSTOMER,
                        title=plan.project_name)
+
+
+# ------------------------------- internal view -------------------------------
+
+EXTRA_CSS_INTERNAL = r"""
+.bar .fill { position:absolute; left:0; top:0; height:100%; border-radius:4px;
+  background:rgba(255,255,255,.35); }
+.ms.reached { background:var(--accent); box-shadow:0 0 0 2px rgba(217,123,18,.25); }
+.todayline { position:absolute; top:0; bottom:0; width:2px; background:var(--accent);
+  opacity:.55; z-index:3; }
+.gantt { position:relative; }
+.row.phase .rlabel .tname { font-weight:600; }
+.row.step .rlabel .dot { width:8px; height:8px; opacity:.75; }
+.row.step .rlabel .tname { color:var(--muted); font-size:12px; }
+.btick { position:absolute; top:4px; bottom:4px; width:2px; margin-left:-1px;
+  background:var(--muted); opacity:.45; z-index:2; }
+.vtag { position:absolute; right:6px; top:7px; height:16px; display:inline-flex;
+  align-items:center; padding:0 6px; border-radius:4px; font-family:var(--mono);
+  font-size:10.5px; z-index:4; background:var(--panel); border:1px solid var(--line);
+  color:var(--muted); }
+.vtag.late { color:#c0392b; border-color:rgba(192,57,43,.4); }
+.vtag.early { color:#2f7d4f; border-color:rgba(47,125,79,.4); }
+.vtag.ontime { opacity:.55; }
+.vtag.new { color:var(--accent); border-color:rgba(217,123,18,.4); }
+.badge-int { display:inline-block; font-family:var(--mono); font-size:11px; letter-spacing:.08em;
+  text-transform:uppercase; color:#fff; background:var(--accent); border-radius:5px;
+  padding:2px 8px; margin-left:8px; vertical-align:middle; }
+.swatch-tick { width:2px; height:14px; background:var(--muted); opacity:.6; display:inline-block; }
+"""
+
+
+def _variance_tag(v: int | None) -> tuple[str, str]:
+    """(label, kind) for a variance in calendar days. None = no baseline entry."""
+    if v is None:
+        return ("nuevo", "new")
+    if v > 0:
+        return (f"+{v}d", "late")
+    if v < 0:
+        return (f"{v}d", "early")
+    return ("±0", "ontime")
+
+
+def _overall_variance_text(v: int | None) -> str:
+    if v is None:
+        return "sin línea base"
+    if v > 0:
+        return f"Atraso de <b>{v} d</b> vs. plan aprobado"
+    if v < 0:
+        return f"Adelanto de <b>{-v} d</b> vs. plan aprobado"
+    return "En plan vs. lo aprobado"
+
+
+def internal_plan_to_chart(plan: InternalPlan) -> Chart:
+    span = max((plan.date_max - plan.date_min).days, 1)
+    rows: list[Row] = []
+    for r in plan.rows:
+        left = _pct(r.start, plan.date_min, span)
+        vlabel, vkind = _variance_tag(r.variance_days)
+        btick = (_pct(r.baseline_end, plan.date_min, span)
+                 if r.baseline_end and plan.date_min <= r.baseline_end <= plan.date_max
+                 else None)
+        if r.kind == "milestone":
+            rows.append(Row(label=f"{r.name}  ({fmt_date(r.start)})", kind="milestone",
+                            left=left, color=ACCENT, reached=r.reached, row_class="milestone",
+                            variance_label=vlabel, variance_kind=vkind, baseline_end_left=btick))
+        else:
+            width = max(_pct(r.end, plan.date_min, span) - left, 0.9)
+            rows.append(Row(label=r.name, kind="phase", left=left, width=width, color=r.color,
+                            progress=r.progress, row_class=r.kind, indent=r.indent,
+                            variance_label=vlabel, variance_kind=vkind, baseline_end_left=btick))
+    today_left = (_pct(plan.as_of, plan.date_min, span)
+                  if plan.date_min <= plan.as_of <= plan.date_max else None)
+    step = 7 / span * 100
+    n_phases = sum(1 for r in plan.rows if r.kind == "phase")
+    n_steps = sum(1 for r in plan.rows if r.kind == "step")
+    var = _overall_variance_text(plan.overall_variance_days).replace("<b>", "").replace("</b>", "")
+    meta = (f"Avance <b>{plan.overall_progress:.0f}%</b> · {n_phases} fases · {n_steps} pasos · "
+            f"{var} · al {fmt_date(plan.as_of)} {plan.as_of.year}")
+    return Chart(title=plan.project_name,
+                 subtitle="Plan completo — fases, pasos e hitos contra la línea base aprobada.",
+                 meta=meta, rows=rows, step=step, today_left=today_left)
+
+
+def render_internal_page(plan: InternalPlan) -> str:
+    chart = internal_plan_to_chart(plan)
+    approved = (f" · Línea base aprobada {fmt_date(plan.approved_on)} {plan.approved_on.year}"
+                if plan.approved_on else "")
+    header = (
+        '  <p class="eyebrow">Unicontrol · Seguimiento interno'
+        '<span class="badge-int">Uso interno</span></p>\n'
+        f'  <h1>{esc(plan.project_name)}</h1>\n'
+        f'  <p class="lede">Plan completo contra la línea base. Avance '
+        f'<b>{plan.overall_progress:.0f}%</b> · {_overall_variance_text(plan.overall_variance_days)}'
+        f'{approved}.</p>\n'
+        '  <div class="legend"><div class="grp">'
+        '<span class="lg"><span class="swatch-bar"></span>Fase / paso</span>'
+        '<span class="lg"><span class="swatch-ms"></span>Hito</span>'
+        '<span class="lg"><span class="swatch-tick"></span>Fin línea base</span>'
+        '</div><span class="sep"></span><div class="grp">'
+        '<span class="lg"><span class="vtag late" style="position:static">+d</span>Atraso</span>'
+        '<span class="lg"><span class="vtag early" style="position:static">−d</span>Adelanto</span>'
+        '</div></div>'
+    )
+    return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_INTERNAL,
+                       title=f"{plan.project_name} — interno")
