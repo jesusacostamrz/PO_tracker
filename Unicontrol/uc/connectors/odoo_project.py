@@ -33,6 +33,12 @@ class ProjectOdooClient(OdooClient):
             "project.project", [["active", "=", True]], ["id", "name"], limit=limit, order="name"
         )
 
+    def project_by_id(self, project_id: int) -> dict | None:
+        rows = self.search_read(
+            "project.project", [["id", "=", project_id]], ["id", "name"], limit=1
+        )
+        return rows[0] if rows else None
+
     def load_tasks(self, project_ids: list[int], oproj_cfg: dict) -> list[Task]:
         """Read active tasks for the given projects and map them to Task objects."""
         if not project_ids:
