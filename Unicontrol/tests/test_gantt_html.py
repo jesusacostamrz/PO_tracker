@@ -79,6 +79,11 @@ class TestRenderCustomerPage(unittest.TestCase):
         self.assertNotIn("ruta crítica", html)
         self.assertNotIn("días hábiles", html)
 
+    def test_title_is_project_name(self):
+        # the browser-tab title should be the project, not the template artifact's title
+        html = render_customer_page(_plan())
+        self.assertIn("<title>Trabajo Cliente X</title>", html)
+
 
 if __name__ == "__main__":
     unittest.main()

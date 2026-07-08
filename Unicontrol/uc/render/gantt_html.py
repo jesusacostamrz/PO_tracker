@@ -158,8 +158,9 @@ def render_chart(chart: Chart) -> str:
     </section>"""
 
 
-def render_page(header_html: str, body_html: str, extra_css: str = "") -> str:
-    return (f"<title>Plantillas de Cronograma PMI — Unicontrol</title>\n"
+def render_page(header_html: str, body_html: str, extra_css: str = "",
+                title: str = "Plantillas de Cronograma PMI — Unicontrol") -> str:
+    return (f"<title>{esc(title)}</title>\n"
             f"<style>{BASE_CSS}{extra_css}</style>\n"
             f'<div class="wrap">\n{header_html}\n  {body_html}\n</div>')
 
@@ -213,4 +214,5 @@ def render_customer_page(plan: CustomerPlan) -> str:
         '<span class="lg"><span class="swatch-ms" style="background:var(--accent)"></span>'
         'Hito cumplido</span></div></div>'
     )
-    return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_CUSTOMER)
+    return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_CUSTOMER,
+                       title=plan.project_name)
