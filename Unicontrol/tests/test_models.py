@@ -39,7 +39,7 @@ class TestFromOdoo(unittest.TestCase):
             "id": 7, "name": "Maquinado", "planned_date_begin": "2026-01-01 08:00:00",
             "date_deadline": "2026-01-10 17:00:00", "depend_on_ids": [3, 4],
             "stage_id": [44, "Fabricación"], "state": "01_in_progress", "date_end": False,
-            "project_id": [4, "piloto"],
+            "user_ids": [5, 6], "project_id": [4, "piloto"],
         }
         t = Task.from_odoo(row, self.FMAP, self.DONE)
         self.assertEqual(t.id, 7)
@@ -47,6 +47,7 @@ class TestFromOdoo(unittest.TestCase):
         self.assertEqual(t.planned_end, date(2026, 1, 10))
         self.assertEqual(t.depends_on, [3, 4])
         self.assertEqual(t.stage, "Fabricación")
+        self.assertEqual(t.assignee_ids, [5, 6])
         self.assertEqual(t.project_name, "piloto")
         self.assertFalse(t.done)
 

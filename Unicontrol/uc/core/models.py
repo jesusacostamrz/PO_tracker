@@ -48,7 +48,7 @@ class Task:
     done: bool = False
     progress: float = 0.0          # 0–100
     stage: str = ""
-    assignees: list[str] = field(default_factory=list)
+    assignee_ids: list[int] = field(default_factory=list)   # res.users ids (task leaders)
     project_id: int | None = None
     project_name: str = ""
 
@@ -73,6 +73,7 @@ class Task:
         state = g("state") or ""
         actual_end = parse_date(g("actual_end"))
         depends = g("depends_on") or []
+        assignees = g("assignees") or []
         return cls(
             id=row["id"],
             name=row.get("name", ""),
@@ -83,6 +84,7 @@ class Task:
             done=(state in done_states) or actual_end is not None,
             progress=float(g("progress") or 0.0),
             stage=_m2o_label(g("stage")),
+            assignee_ids=[a for a in assignees if isinstance(a, int)],
             project_id=_m2o_id(row.get("project_id")),
             project_name=_m2o_label(row.get("project_id")),
         )

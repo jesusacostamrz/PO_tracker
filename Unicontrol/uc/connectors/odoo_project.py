@@ -48,3 +48,38 @@ class ProjectOdooClient(OdooClient):
             req, order="id",
         )
         return [Task.from_odoo(r, fmap, done_states) for r in rows]
+
+    # ---- recipients ----
+    def project_manager_id(self, project_id: int) -> int | None:
+        """The project's Manager (project.user_id) — the task lead's superior."""
+        rec = self.execute("project.project", "read", [project_id], ["user_id"])
+        uid = rec[0].get("user_id") if rec else None
+        return uid[0] if isinstance(uid, (list, tuple)) and uid else None
+
+    def partner_ids_for_users(self, user_ids: list[int]) -> list[int]:
+        """Map res.users ids → their partner ids (needed to notify via message_post)."""
+        if not user_ids:
+            return []
+        rows = self.search_read("res.users", [["id", "in", list(user_ids)]], ["partner_id"])
+        out = []
+        for r in rows:
+            pid = r.get("partner_id")
+            if isinstance(pid, (list, tuple)) and pid:
+                out.append(pid[0])
+        return out
+
+    # ---- write path (narrow, reversible) ----
+    def write_task(self, task_id: int, vals: dict) -> bool:
+        """Write vals onto one project.task. Mirrors OdooClient.set_client_order_ref."""
+        return self.execute("project.task", "write", [task_id], vals)
+
+    def notify_task(self, task_id: int, body: str, partner_ids: list[int]) -> int:
+        """Post an internal note on the task and notify the given partners (Odoo emails them).
+
+        INTERNAL ONLY — partner_ids are Unicontrol users, never customers.
+        """
+        return self.execute(
+            "project.task", "message_post", [task_id],
+            body=body, partner_ids=list(partner_ids),
+            message_type="comment", subtype_xmlid="mail.mt_comment",
+        )
