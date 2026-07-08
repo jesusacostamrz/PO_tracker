@@ -51,6 +51,7 @@ class Task:
     assignee_ids: list[int] = field(default_factory=list)   # res.users ids (task leaders)
     project_id: int | None = None
     project_name: str = ""
+    parent_id: int | None = None
 
     @property
     def duration_days(self) -> int:
@@ -87,6 +88,7 @@ class Task:
             assignee_ids=[a for a in assignees if isinstance(a, int)],
             project_id=_m2o_id(row.get("project_id")),
             project_name=_m2o_label(row.get("project_id")),
+            parent_id=_m2o_id(g("parent")),
         )
 
 

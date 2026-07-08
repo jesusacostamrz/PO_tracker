@@ -68,6 +68,16 @@ class TestFromOdoo(unittest.TestCase):
         row = {"id": 11, "name": "x", "state": "03_approved", "depend_on_ids": []}
         self.assertFalse(Task.from_odoo(row, self.FMAP, self.DONE).done)
 
+    def test_maps_parent_id(self):
+        row = {"id": 20, "name": "2.1 x", "state": "01_in_progress",
+               "depend_on_ids": [], "parent_id": [17, "2. Diseño"]}
+        self.assertEqual(Task.from_odoo(row, {**self.FMAP, "parent": "parent_id"}, self.DONE).parent_id, 17)
+
+    def test_parent_id_none_when_top_level(self):
+        row = {"id": 21, "name": "2. Diseño", "state": "01_in_progress",
+               "depend_on_ids": [], "parent_id": False}
+        self.assertIsNone(Task.from_odoo(row, {**self.FMAP, "parent": "parent_id"}, self.DONE).parent_id)
+
 
 if __name__ == "__main__":
     unittest.main()
