@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from uc.core.config import add_hermes_to_path, load_config  # noqa: E402
-from uc.core.customer_view import build  # noqa: E402
+from uc.core.customer_view import build, is_hierarchical  # noqa: E402
 from uc.render.gantt_html import render_customer_page  # noqa: E402
 
 add_hermes_to_path()
@@ -40,6 +40,13 @@ def main() -> int:
     if not tasks:
         print(f"ERROR: project [{args.project_id}] {proj['name']} has no tasks", file=sys.stderr)
         return 2
+
+    # Leak-safety gate: a flat project would render every internal leaf as a "phase".
+    if not is_hierarchical(tasks):
+        print(f"ERROR: project [{args.project_id}] {proj['name']} has no phase hierarchy "
+              "(flat task list). Restructure it into parent phases before sharing — otherwise "
+              "the customer view would expose internal task detail.", file=sys.stderr)
+        return 4
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else date.today()
     plan = build(tasks, project_name=proj["name"], as_of=as_of)

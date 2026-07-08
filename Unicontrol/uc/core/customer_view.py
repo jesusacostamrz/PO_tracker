@@ -40,6 +40,17 @@ def weighted_progress(tasks: list[Task]) -> float:
     return round(acc / total, 1)
 
 
+def is_hierarchical(tasks: list[Task]) -> bool:
+    """True when the project has real phase/child structure (some task has a parent).
+
+    Leak-safety depends on it: in a hierarchical project only top-level parents become
+    customer-visible phase rows and children stay hidden. A FLAT project (no parent set)
+    would turn every internal leaf into a top-level 'phase' and expose its name, so the
+    customer CLI refuses one that isn't hierarchical.
+    """
+    return any(t.parent_id is not None for t in tasks)
+
+
 @dataclass
 class PhaseBar:
     name: str
@@ -96,6 +107,8 @@ def build(tasks: list[Task], project_name: str, as_of: date | None = None) -> Cu
     for i, p in enumerate(phases):
         p.color = PHASE_PALETTE[i % len(PHASE_PALETTE)]
 
+    # Milestones are expected to be TOP-LEVEL tasks (the loader never nests a ★ task).
+    # A ★ task nested as a child would be treated as phase progress, not shown here.
     milestones: list[MilestoneMark] = []
     for t in tops:
         if not is_milestone(t):

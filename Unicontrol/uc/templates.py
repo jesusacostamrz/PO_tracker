@@ -6,6 +6,8 @@ Consumed by scripts/load_templates.py (creates Odoo projects) and the Gantt arti
 """
 from __future__ import annotations
 
+from collections import Counter
+
 # (wbs, name, etapa, dur, preds, milestone)
 MACHINING = [
     ("1.1", "Kickoff y revisión de OC/alcance", "Diseño", 1, [], False),
@@ -92,8 +94,6 @@ TEMPLATES = {
     "[PLANTILLA] Proyecto de Maquinado": MACHINING,
     "[PLANTILLA] Integración de Sistemas": INTEGRATION,
 }
-
-from collections import Counter
 
 PHASE_NAMES = {
     "[PLANTILLA] Proyecto de Maquinado": {

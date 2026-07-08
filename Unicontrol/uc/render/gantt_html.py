@@ -186,7 +186,7 @@ def plan_to_chart(plan: CustomerPlan) -> Chart:
         left = _pct(ph.start, plan.date_min, span)
         width = max(_pct(ph.end, plan.date_min, span) - left, 0.9)
         rows.append(Row(label=ph.name, kind="phase", left=left, width=width,
-                        color=ph.color, progress=ph.progress, reached=ph.done))
+                        color=ph.color, progress=ph.progress))
     for m in plan.milestones:
         rows.append(Row(label=f"{m.name}  ({fmt_date(m.day)})", kind="milestone",
                         left=_pct(m.day, plan.date_min, span), color=ACCENT,

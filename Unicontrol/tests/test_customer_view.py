@@ -32,6 +32,14 @@ class TestHelpers(unittest.TestCase):
               _mk(2, "b", "2026-07-15", "2026-07-27", progress=100)]
         self.assertEqual(cv.weighted_progress(ts), 85.7)
 
+    def test_is_hierarchical_true_when_a_task_has_parent(self):
+        ts = [_mk(1, "2. Diseño"), _mk(2, "2.1  Layout", parent=1)]
+        self.assertTrue(cv.is_hierarchical(ts))
+
+    def test_is_hierarchical_false_for_flat_project(self):
+        ts = [_mk(1, "1.1  x"), _mk(2, "1.2  y"), _mk(3, "★ M1  z")]
+        self.assertFalse(cv.is_hierarchical(ts))
+
 
 class TestBuild(unittest.TestCase):
     def _tasks(self):
