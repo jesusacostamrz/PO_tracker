@@ -92,3 +92,51 @@ TEMPLATES = {
     "[PLANTILLA] Proyecto de Maquinado": MACHINING,
     "[PLANTILLA] Integración de Sistemas": INTEGRATION,
 }
+
+from collections import Counter
+
+PHASE_NAMES = {
+    "[PLANTILLA] Proyecto de Maquinado": {
+        "1": "1. Inicio y alcance",
+        "2": "2. Diseño",
+        "3": "3. Revisión de diseño",
+        "4": "4. Compras y materiales",
+        "5": "5. Maquinado",
+        "6": "6. Inspección y acabado",
+        "7": "7. Entrega y cierre",
+    },
+    "[PLANTILLA] Integración de Sistemas": {
+        "1": "1. Requerimientos",
+        "2": "2. Diseño conceptual",
+        "3": "3. Diseño detallado",
+        "4": "4. Revisión de diseño",
+        "5": "5. Compras",
+        "6": "6. Fabricación",
+        "7": "7. Ensamble mecánico",
+        "8": "8. Ensamble eléctrico y control",
+        "9": "9. Pruebas y FAT",
+        "10": "10. Entrega y SAT",
+        "11": "11. Cierre",
+    },
+}
+
+
+def phase_groups(items, phase_names) -> list[dict]:
+    """Group non-milestone template rows by WBS-major into ordered phases."""
+    order: list[str] = []
+    groups: dict[str, dict] = {}
+    etapas: dict[str, list[str]] = {}
+    for (w, _name, etapa, _dur, _preds, mile) in items:
+        if mile:
+            continue
+        major = w.split(".")[0]
+        if major not in groups:
+            groups[major] = {"major": major, "name": phase_names.get(major, f"Fase {major}"),
+                             "etapa": "", "leaves": []}
+            etapas[major] = []
+            order.append(major)
+        groups[major]["leaves"].append(w)
+        etapas[major].append(etapa)
+    for major in order:
+        groups[major]["etapa"] = Counter(etapas[major]).most_common(1)[0][0]
+    return [groups[m] for m in order]
