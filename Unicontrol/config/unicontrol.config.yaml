@@ -26,6 +26,8 @@ odoo_project:
     state: state
     progress: progress          # may be absent on plain project.task → treated as 0
     actual_end: date_end
+    parent: parent_id
+    tag_ids: tag_ids
   # Odoo 17 task states: 01_in_progress, 02_changes_requested, 03_approved,
   # 04_waiting_normal, 1_done, 1_canceled. A task is "closed" (excluded from risk) when:
   done_states: ["1_done", "1_canceled"]

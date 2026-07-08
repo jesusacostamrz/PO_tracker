@@ -79,6 +79,17 @@ class ProjectOdooClient(OdooClient):
     def create_task(self, vals: dict) -> int:
         return self.execute("project.task", "create", vals)
 
+    def tag_id(self, name: str, color: int = 0) -> int:
+        """Find-or-create a project.tags by name; returns its id."""
+        rows = self.search_read("project.tags", [["name", "=", name]], ["id"], limit=1)
+        if rows:
+            return rows[0]["id"]
+        return self.execute("project.tags", "create", {"name": name, "color": color})
+
+    def archive_project(self, project_id: int) -> bool:
+        """Reversible 'delete': set active=False on the project (cascades to its tasks)."""
+        return self.execute("project.project", "write", [project_id], {"active": False})
+
     def notify_task(self, task_id: int, body: str, partner_ids: list[int]) -> int:
         """Post an internal note on the task and notify the given partners (Odoo emails them).
 
