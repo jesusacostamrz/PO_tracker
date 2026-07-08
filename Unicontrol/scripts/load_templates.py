@@ -42,14 +42,12 @@ def _load_one(odoo, fmap, name, items, start):
 
     # 1) parent phase tasks
     groups = phase_groups(items, PHASE_NAMES.get(name, {}))
-    parent_of: dict[str, int] = {}   # major -> parent task id
-    parent_id_by_major: dict[str, int] = {}
+    parent_id_by_major: dict[str, int] = {}   # major -> parent task id
     for g in groups:
         vals = {"name": g["name"], "project_id": pid, fmap["tag_ids"]: tag_for(g["etapa"])}
         parent_id_by_major[g["major"]] = odoo.create_task(vals)
 
     # 2) leaf + milestone tasks
-    row = {w: (n, e, dur, preds, mile) for (w, n, e, dur, preds, mile) in items}
     wbs2id: dict[str, int] = {}
     for (w, tname, etapa, dur, _preds, mile) in items:
         es, ef = sched[w]
@@ -74,7 +72,6 @@ def _load_one(odoo, fmap, name, items, start):
 
     # 4) roll up parent dates from children
     for g in groups:
-        child_ids = [wbs2id[w] for w in g["leaves"]]
         begins = add_working_days(start, min(sched[w][0] for w in g["leaves"]))
         ends = add_working_days(start, max((sched[w][1] - 1) for w in g["leaves"]))
         odoo.write_task(parent_id_by_major[g["major"]], {
