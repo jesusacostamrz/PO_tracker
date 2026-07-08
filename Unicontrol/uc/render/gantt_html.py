@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from uc.core.customer_view import CustomerPlan
+from uc.core.palette import ACCENT
+
 MONTHS = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
 
@@ -169,3 +172,45 @@ EXTRA_CSS_CUSTOMER = r"""
   opacity:.55; z-index:3; }
 .gantt { position:relative; }
 """
+
+
+def _pct(day, dmin, span_days: int) -> float:
+    return (day - dmin).days / span_days * 100
+
+
+def plan_to_chart(plan: CustomerPlan) -> Chart:
+    span = max((plan.date_max - plan.date_min).days, 1)
+    rows: list[Row] = []
+    for ph in plan.phases:
+        left = _pct(ph.start, plan.date_min, span)
+        width = max(_pct(ph.end, plan.date_min, span) - left, 0.9)
+        rows.append(Row(label=ph.name, kind="phase", left=left, width=width,
+                        color=ph.color, progress=ph.progress, reached=ph.done))
+    for m in plan.milestones:
+        rows.append(Row(label=f"{m.name}  ({fmt_date(m.day)})", kind="milestone",
+                        left=_pct(m.day, plan.date_min, span), color=ACCENT,
+                        reached=m.reached))
+    today_left = (_pct(plan.as_of, plan.date_min, span)
+                  if plan.date_min <= plan.as_of <= plan.date_max else None)
+    step = 7 / span * 100
+    meta = (f"Avance <b>{plan.overall_progress:.0f}%</b> · {len(plan.phases)} fases · "
+            f"{len(plan.milestones)} hitos · al {fmt_date(plan.as_of)} {plan.as_of.year}")
+    return Chart(title=plan.project_name,
+                 subtitle="Cronograma del proyecto — fases y fechas clave.",
+                 meta=meta, rows=rows, step=step, today_left=today_left)
+
+
+def render_customer_page(plan: CustomerPlan) -> str:
+    chart = plan_to_chart(plan)
+    header = (
+        '  <p class="eyebrow">Unicontrol · Avance de proyecto</p>\n'
+        f'  <h1>{esc(plan.project_name)}</h1>\n'
+        f'  <p class="lede">Fases principales y fechas clave. Avance general '
+        f'<b>{plan.overall_progress:.0f}%</b> al {fmt_date(plan.as_of)} {plan.as_of.year}.</p>\n'
+        '  <div class="legend"><div class="grp">'
+        '<span class="lg"><span class="swatch-bar"></span>Fase</span>'
+        '<span class="lg"><span class="swatch-ms"></span>Hito pendiente</span>'
+        '<span class="lg"><span class="swatch-ms" style="background:var(--accent)"></span>'
+        'Hito cumplido</span></div></div>'
+    )
+    return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_CUSTOMER)

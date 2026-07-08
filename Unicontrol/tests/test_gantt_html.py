@@ -1,6 +1,16 @@
 import unittest
+from datetime import date
 
-from uc.render.gantt_html import Chart, Row, esc, fmt_date, render_chart
+from uc.core.customer_view import CustomerPlan, MilestoneMark, PhaseBar
+from uc.render.gantt_html import (
+    Chart,
+    Row,
+    esc,
+    fmt_date,
+    plan_to_chart,
+    render_chart,
+    render_customer_page,
+)
 
 
 class TestRenderChart(unittest.TestCase):
@@ -32,6 +42,42 @@ class TestRenderChart(unittest.TestCase):
         from datetime import date
         self.assertEqual(fmt_date(date(2026, 7, 24)), "24 jul")
         self.assertEqual(esc("<a>"), "&lt;a&gt;")
+
+
+def _plan():
+    return CustomerPlan(
+        project_name="Trabajo Cliente X",
+        phases=[
+            PhaseBar("Diseño", "#3f7cac", date(2026, 7, 13), date(2026, 7, 24), 100.0, True),
+            PhaseBar("Maquinado", "#7a6cae", date(2026, 8, 10), date(2026, 8, 18), 50.0, False),
+        ],
+        milestones=[MilestoneMark("Piezas entregadas", date(2026, 9, 18), False)],
+        date_min=date(2026, 7, 13), date_max=date(2026, 9, 18),
+        as_of=date(2026, 8, 1), overall_progress=62.0,
+    )
+
+
+class TestPlanToChart(unittest.TestCase):
+    def test_first_phase_starts_at_zero(self):
+        self.assertAlmostEqual(plan_to_chart(_plan()).rows[0].left, 0.0, places=3)
+
+    def test_milestone_at_far_end(self):
+        ms = [r for r in plan_to_chart(_plan()).rows if r.kind == "milestone"]
+        self.assertEqual(len(ms), 1)
+        self.assertAlmostEqual(ms[0].left, 100.0, places=3)
+
+    def test_today_line_within_range(self):
+        self.assertIsNotNone(plan_to_chart(_plan()).today_left)
+
+
+class TestRenderCustomerPage(unittest.TestCase):
+    def test_self_contained_and_leak_safe(self):
+        html = render_customer_page(_plan())
+        self.assertIn("<style>", html)
+        self.assertIn("Trabajo Cliente X", html)
+        self.assertIn("62", html)
+        self.assertNotIn("ruta crítica", html)
+        self.assertNotIn("días hábiles", html)
 
 
 if __name__ == "__main__":
