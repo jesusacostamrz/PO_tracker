@@ -32,12 +32,14 @@ def _load_one(odoo, fmap, name, items, start):
     sched = forward_schedule([(w, dur, preds) for (w, _n, _e, dur, preds, _m) in items])
     pid = odoo.create_project(name)
 
-    # tag ids per etapa (find-or-create once)
+    # tag ids per etapa (find-or-create once). Milestones' etapa "—" is labeled "Hito"
+    # so the kanban card carries a meaningful tag, not a dash.
     tag_ids: dict[str, int] = {}
 
     def tag_for(etapa: str) -> list:
         if etapa not in tag_ids:
-            tag_ids[etapa] = odoo.tag_id(etapa, ETAPA_TAG_COLOR.get(etapa, 0))
+            label = "Hito" if etapa == "—" else etapa
+            tag_ids[etapa] = odoo.tag_id(label, ETAPA_TAG_COLOR.get(etapa, 0))
         return [(6, 0, [tag_ids[etapa]])]
 
     # 1) parent phase tasks
