@@ -1,0 +1,19 @@
+# Same stack as hermes/ (connectors are imported from the sibling hermes package).
+google-api-python-client>=2.100
+google-auth>=2.23
+google-auth-oauthlib>=1.1
+google-auth-httplib2>=0.2
+
+# LLM — OpenAI SDK works for OpenAI AND GLM/Zhipu via base_url override
+openai>=1.40
+
+# PDF text + image render (client Gantts, Phase 1b)
+pdfplumber>=0.11
+pypdfium2>=4.0
+
+# Config + env
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Odoo uses the stdlib xmlrpc.client — no dependency needed.
+# The deterministic core (uc/core/critical_path.py, risk.py, models.py) is stdlib-only.

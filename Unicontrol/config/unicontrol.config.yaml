@@ -1,0 +1,66 @@
+# Unicontrol PM tools — non-secret settings. Secrets come from .secrets/.env via ${VAR}.
+
+company:
+  legal_name: UNICONTROL Y GABINETES DEL PACIFICO S DE RL DE CV
+  aka: [Unicontrol]
+
+odoo:
+  url: https://unicontrol.odoo.com
+  db: unicontrol
+  username: ${ODOO_USERNAME}        # Unicontrolbot login email
+  api_key_env: ODOO_API_KEY         # value lives in .secrets/.env
+
+odoo_project:
+  # CONFIRMED against unicontrol.odoo.com (Odoo 17.0+e) via scripts/test_project.py.
+  # Notes: no `planned_date_end` (the end IS `date_deadline`); no `kanban_state`/`is_closed`
+  # (done is the `state` selection field); "Blocked By" = depend_on_ids.
+  active_field: active
+  fields:
+    planned_start: planned_date_begin
+    planned_end: date_deadline
+    deadline: date_deadline
+    depends_on: depend_on_ids
+    stage: stage_id
+    assignees: user_ids
+    milestone: milestone_id
+    state: state
+    progress: progress          # may be absent on plain project.task → treated as 0
+    actual_end: date_end
+  # Odoo 17 task states: 01_in_progress, 02_changes_requested, 03_approved,
+  # 04_waiting_normal, 1_done, 1_canceled. A task is "closed" (excluded from risk) when:
+  done_states: ["1_done", "1_canceled"]
+  # Stage "Entregado" has fold=True (delivered); used as a secondary closed signal later.
+
+llm:
+  base_url: ${LLM_BASE_URL}
+  api_key_env: LLM_API_KEY
+  model: ${LLM_MODEL}
+  vision_model: ${LLM_VISION_MODEL}
+
+sheets:
+  spreadsheet_id: ${UC_SHEETS_SPREADSHEET_ID}
+  service_account_path: ../hermes/.secrets/google_service_account.json
+  tabs:
+    baselines: Baselines
+    at_risk: AtRisk
+    alerts: Alerts
+    approvals: Approvals
+    audit: Audit
+
+alerts:
+  channel: email                    # email (gmail.send) | sheet
+  from_addr: pounicontrol@gmail.com
+  approver_email: ${UC_APPROVER_EMAIL}
+  dept_emails: {}                   # e.g. { Maquinado: robert@..., Diseño: loder@... }
+
+risk:
+  near_deadline_days: 3
+  min_progress: 10
+
+digest:
+  weekly_time: "Mon 07:00"
+  timezone: America/Tijuana
+
+runtime:
+  dry_run: true                     # start safe: log intended actions, write nothing
+  log_level: INFO
