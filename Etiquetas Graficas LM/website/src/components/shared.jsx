@@ -33,7 +33,11 @@ export function ImageFallback({ src, alt, className = '', gradient = 'from-prima
   )
 }
 
-/* Reveal por scroll reutilizable (patrón de GSAP del App original). */
+/* Reveal por scroll reutilizable (patrón de GSAP del App original).
+   - clearProps al terminar: el elemento queda con transform limpio para no
+     pelear con otros efectos (tilt) ni dejar offsets residuales.
+   - Si hay elementos .parallax-drift dentro de la sección, se les aplica
+     una deriva sutil ligada al scroll (solo transform). */
 export function useReveal(selector = '.reveal', opts = {}) {
   const ref = useRef(null)
   useEffect(() => {
@@ -46,8 +50,22 @@ export function useReveal(selector = '.reveal', opts = {}) {
         duration: 0.8,
         stagger: 0.12,
         ease: 'power3.out',
+        clearProps: 'transform,opacity',
         ...opts,
       })
+      const drift = ref.current?.querySelectorAll('.parallax-drift')
+      if (drift?.length) {
+        gsap.to(drift, {
+          scrollTrigger: {
+            trigger: ref.current,
+            start: 'top bottom',
+            end: 'bottom top',
+            scrub: 1,
+          },
+          y: 70,
+          ease: 'none',
+        })
+      }
     }, ref)
     return () => ctx.revert()
   }, [selector])
@@ -92,8 +110,16 @@ export function GlowLayer({ color = '33,120,196', opacity = 0.09 }) {
 }
 
 /* Tarjeta con tilt 3D que sigue al mouse + barrido de brillo (sheen).
-   Solo transform/opacity. Respeta prefers-reduced-motion. */
-export function TiltCard({ children, className = '', max = 7, as: Tag = 'div', ...rest }) {
+   El tilt vive en el elemento INTERNO; el envoltorio externo (revealClass)
+   es el objetivo del reveal de scroll — nunca comparten transform. */
+export function TiltCard({
+  children,
+  className = '',
+  revealClass = '',
+  max = 7,
+  as: Tag = 'div',
+  ...rest
+}) {
   const ref = useRef(null)
   const onMove = (e) => {
     if (prefersReducedMotion) return
@@ -109,15 +135,37 @@ export function TiltCard({ children, className = '', max = 7, as: Tag = 'div', .
     if (ref.current) ref.current.style.transform = ''
   }
   return (
-    <Tag
-      ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
-      className={`eg-tilt group ${className}`}
-      {...rest}
+    <div className={revealClass}>
+      <Tag
+        ref={ref}
+        onMouseMove={onMove}
+        onMouseLeave={onLeave}
+        className={`eg-tilt group block w-full h-full text-left ${className}`}
+        {...rest}
+      >
+        {children}
+        <span aria-hidden="true" className="eg-sheen" />
+      </Tag>
+    </div>
+  )
+}
+
+/* Divisor de ola entre secciones: se coloca en el tope de la sección
+   siguiente con el color de fondo de la sección anterior. */
+export function WaveDivider({ fill = '#F7F7F4', flip = false }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none absolute inset-x-0 leading-none ${
+        flip ? 'bottom-0 rotate-180' : 'top-0'
+      }`}
     >
-      {children}
-      <span aria-hidden="true" className="eg-sheen" />
-    </Tag>
+      <svg viewBox="0 0 1440 72" preserveAspectRatio="none" className="block w-full h-10 sm:h-16">
+        <path
+          d="M0,0 H1440 V16 C1140,68 820,6 500,36 C310,54 150,46 0,18 Z"
+          fill={fill}
+        />
+      </svg>
+    </div>
   )
 }

@@ -148,6 +148,12 @@
       opacity: 0;
     }
   }
+  /* Tintes radiales suaves de marca para dar profundidad a fondos claros */
+  .soft-tints {
+    background-image:
+      radial-gradient(900px 520px at 10% 0%, rgba(33, 120, 196, 0.07), transparent 62%),
+      radial-gradient(820px 480px at 96% 100%, rgba(224, 56, 43, 0.05), transparent 62%);
+  }
   /* Patrón sutil de contornos de suaje para fondos claros */
   .diecut-pattern {
     background-image: radial-gradient(rgba(22, 33, 107, 0.05) 1.2px, transparent 1.2px);

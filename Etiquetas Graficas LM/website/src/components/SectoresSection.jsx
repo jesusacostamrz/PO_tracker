@@ -10,8 +10,9 @@ export default function SectoresSection() {
     <section
       id="sectores"
       ref={ref}
-      className="relative bg-surface py-24 sm:py-32 border-t border-divider overflow-hidden diecut-pattern"
+      className="relative bg-gradient-to-b from-background via-surface to-surface py-24 sm:py-32 overflow-hidden"
     >
+      <div className="absolute inset-0 diecut-pattern" aria-hidden="true" />
       <GlowLayer />
       <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="flex flex-wrap items-end justify-between gap-6 mb-14">
@@ -38,7 +39,8 @@ export default function SectoresSection() {
               key={s.slug}
               as={Link}
               to="/sectores"
-              className="sec-card relative rounded-3xl overflow-hidden min-h-[250px] flex items-end border border-divider"
+              revealClass="sec-card h-full"
+              className="relative rounded-3xl overflow-hidden min-h-[250px] flex items-end border border-divider"
             >
               <ImageFallback
                 src={s.image}

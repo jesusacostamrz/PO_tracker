@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Droplets, Sparkles, ShieldCheck, ChevronRight } from 'lucide-react'
 import { MATERIALES } from '../data/materiales.js'
-import { ImageFallback, useReveal, GlowLayer, TiltCard } from './shared.jsx'
+import { ImageFallback, useReveal, GlowLayer, TiltCard, WaveDivider } from './shared.jsx'
 
 const TRAIT_ICONS = [Droplets, Sparkles, ShieldCheck]
 
@@ -98,7 +98,12 @@ export default function Materiales() {
   const ref = useReveal('.mat-card')
 
   return (
-    <section id="materiales" ref={ref} className="relative bg-background py-24 sm:py-32 overflow-hidden">
+    <section
+      id="materiales"
+      ref={ref}
+      className="relative bg-background soft-tints pt-32 pb-24 sm:pb-32 overflow-hidden"
+    >
+      <WaveDivider fill="#0A1038" />
       <GlowLayer />
       <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="max-w-2xl mb-14">
@@ -117,7 +122,8 @@ export default function Materiales() {
               key={m.slug}
               as="button"
               onClick={() => setActive(m)}
-              className="mat-card text-left rounded-3xl overflow-hidden bg-surface border border-divider shadow-sm"
+              revealClass="mat-card"
+              className="rounded-3xl overflow-hidden bg-surface border border-divider shadow-sm"
             >
               <ImageFallback src={m.image} alt={m.name} className="h-44 w-full object-cover" />
               <div className="p-6">

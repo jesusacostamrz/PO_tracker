@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Star } from 'lucide-react'
 import { TESTIMONIOS } from '../data/testimonios.js'
 import { prefersReducedMotion } from '../data/site.js'
-import { GlowLayer } from './shared.jsx'
+import { GlowLayer, WaveDivider, useReveal } from './shared.jsx'
 
 /* Slide deck: una cita grande centrada a la vez, avance automático,
    flechas, swipe y paginación por puntos. */
@@ -21,21 +21,24 @@ export default function Testimonios() {
   }, [paused, n])
 
   const t = TESTIMONIOS[idx]
+  const ref = useReveal('.testi-reveal')
 
   return (
     <section
-      className="relative bg-background py-24 sm:py-32 overflow-hidden diecut-pattern"
+      ref={ref}
+      className="relative bg-background pt-32 pb-24 sm:pb-32 overflow-hidden diecut-pattern"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
+      <WaveDivider fill="#0A1038" />
       <GlowLayer />
       <div className="relative max-w-4xl mx-auto px-6 sm:px-10 text-center">
-        <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-10">
+        <p className="testi-reveal font-mono text-xs uppercase tracking-[0.25em] text-accent mb-10">
           Testimonios
         </p>
 
         <div
-          className="select-none"
+          className="testi-reveal select-none"
           onTouchStart={(e) => {
             touchX.current = e.touches[0].clientX
           }}
@@ -68,7 +71,7 @@ export default function Testimonios() {
           </div>
         </div>
 
-        <div className="mt-10 flex items-center justify-center gap-6">
+        <div className="testi-reveal mt-10 flex items-center justify-center gap-6">
           <button
             onClick={() => go(-1)}
             aria-label="Testimonio anterior"

@@ -1,5 +1,5 @@
 import { PenTool, Layers, FileCheck, Printer, SearchCheck, Truck } from 'lucide-react'
-import { useReveal, GlowLayer } from './shared.jsx'
+import { useReveal, GlowLayer, WaveDivider } from './shared.jsx'
 
 const PASOS = [
   { n: '01', icon: PenTool, title: 'Diseño', text: 'Preprensa y prueba de color.' },
@@ -15,9 +15,28 @@ export default function Proceso() {
   const ref = useReveal('.paso-item', { y: 30, stagger: 0.1 })
 
   return (
-    <section ref={ref} className="relative bg-deep text-white py-24 sm:py-32 overflow-hidden">
+    <section
+      ref={ref}
+      className="relative bg-gradient-to-b from-deep via-[#0E1850] to-deep text-white pt-32 pb-24 sm:pb-32 overflow-hidden"
+    >
+      <WaveDivider fill="#F7F7F4" />
       <GlowLayer color="33,120,196" opacity={0.14} />
-      <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-primary/25 blur-3xl" />
+      <div className="parallax-drift absolute -top-24 -left-24 h-80 w-80 rounded-full bg-primary/25 blur-3xl" />
+      {/* Motivo: globo EG gigante delineado, deriva con el scroll */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 200 200"
+        className="parallax-drift absolute -right-40 -bottom-52 h-[560px] w-[560px] opacity-[0.05]"
+      >
+        <g stroke="#FFFFFF" strokeWidth="1.2" fill="none">
+          <circle cx="100" cy="100" r="92" />
+          <circle cx="100" cy="100" r="56" />
+          <ellipse cx="100" cy="100" rx="18" ry="56" />
+          <ellipse cx="100" cy="100" rx="38" ry="56" />
+          <line x1="44" y1="100" x2="156" y2="100" />
+          <path d="M52 74 H148 M52 126 H148" />
+        </g>
+      </svg>
       <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="max-w-2xl mb-16">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-primary-light mb-4">

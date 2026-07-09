@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react'
 import { wa, WA_DEFAULT, PHONE_DISPLAY, PHONE_TEL, EMAIL, ADDRESS } from '../data/site.js'
+import { useReveal } from './shared.jsx'
 
 function Field({ label, children }) {
   return (
@@ -59,11 +60,13 @@ export default function ContactForm() {
       `${form.message || ''}`.trim()
   )
 
+  const ref = useReveal('.contact-reveal')
+
   return (
-    <section id="contacto" className="bg-surface py-24 sm:py-32 border-t border-divider">
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
+    <section id="contacto" ref={ref} className="relative bg-surface soft-tints py-24 sm:py-32 overflow-hidden">
+      <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="grid lg:grid-cols-12 gap-12">
-          <div className="lg:col-span-5">
+          <div className="contact-reveal lg:col-span-5">
             <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">
               Contacto
             </p>
@@ -147,7 +150,7 @@ export default function ContactForm() {
             </div>
           </div>
 
-          <div className="lg:col-span-7">
+          <div className="contact-reveal lg:col-span-7">
             {status === 'sent' ? (
               <div className="h-full min-h-[420px] flex flex-col items-center justify-center text-center rounded-3xl border border-divider bg-background p-12">
                 <div className="h-16 w-16 rounded-full bg-emerald-500/15 flex items-center justify-center mb-6">

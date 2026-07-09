@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { SUAJES, SUAJE_GRUPOS } from '../data/suajes.js'
 import { MATERIALES } from '../data/materiales.js'
@@ -117,6 +117,26 @@ function specialPath(text, x0, y0, sw, sh) {
   return null // sin plantilla honesta → caja punteada
 }
 
+/* Normaliza cualquier plantilla a la caja medida EXACTA: mide el bbox real
+   del path renderizado y lo escala/traslada para inscribirlo en
+   [x0,y0,sw,sh] tocando los cuatro lados — las cotas siempre coinciden. */
+function FitPath({ d, x0, y0, sw, sh }) {
+  const pathRef = useRef(null)
+  const [t, setT] = useState('')
+  useLayoutEffect(() => {
+    const bb = pathRef.current?.getBBox()
+    if (!bb || bb.width < 1e-6 || bb.height < 1e-6) return
+    setT(
+      `translate(${x0},${y0}) scale(${sw / bb.width},${sh / bb.height}) translate(${-bb.x},${-bb.y})`
+    )
+  }, [d, x0, y0, sw, sh])
+  return (
+    <g transform={t}>
+      <path ref={pathRef} d={d} vectorEffect="non-scaling-stroke" />
+    </g>
+  )
+}
+
 /* Dibuja el suaje a escala con cotas (mm + cm), estilo plantilla impresa. */
 function SuajePreview({ shape, w_mm, h_mm, desc }) {
   const w = Number(w_mm) || 0
@@ -147,7 +167,7 @@ function SuajePreview({ shape, w_mm, h_mm, desc }) {
     if (shape === 'oval') return <ellipse cx={cx} cy={cy} rx={sw / 2} ry={sh / 2} />
     if (shape === 'special') {
       const d = specialPath(desc, x0, y0, sw, sh)
-      if (d) return <path d={d} />
+      if (d) return <FitPath d={d} x0={x0} y0={y0} sw={sw} sh={sh} />
       // Sin plantilla: caja envolvente honesta, nunca un polígono engañoso
       unknownSpecial = true
       return <rect x={x0} y={y0} width={sw} height={sh} strokeDasharray="6 4" fill="none" />
@@ -234,64 +254,107 @@ function buildSketchPath(points, closed) {
   return d
 }
 
+/* Simplificación Ramer-Douglas-Peucker. */
+function rdp(pts, eps) {
+  if (pts.length < 3) return pts
+  const a = pts[0]
+  const b = pts[pts.length - 1]
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len = Math.hypot(dx, dy) || 1e-9
+  let maxD = 0
+  let idx = 0
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs(dy * pts[i].x - dx * pts[i].y + b.x * a.y - b.y * a.x) / len
+    if (d > maxD) {
+      maxD = d
+      idx = i
+    }
+  }
+  if (maxD <= eps) return [a, b]
+  return [...rdp(pts.slice(0, idx + 1), eps).slice(0, -1), ...rdp(pts.slice(idx), eps)]
+}
+
+/* Trazo crudo → puntos limpios: RDP y luego giros suaves (< 36°) se marcan
+   como curva (suavizado cuadrático en buildSketchPath); giros marcados
+   quedan como líneas rectas. */
+function fitStroke(raw, eps) {
+  const pts = rdp(raw, eps).map((p) => ({ x: p.x, y: p.y }))
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    const c = pts[i + 1]
+    let dAng = Math.abs(
+      Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x)
+    )
+    if (dAng > Math.PI) dAng = 2 * Math.PI - dAng
+    if (dAng < Math.PI / 5) {
+      pts[i].curve = true
+      pts[i + 1].curve = true
+    }
+  }
+  return pts
+}
+
 function DibujoEspecial({ w, h, sketch, onChange }) {
   const svgRef = useRef(null)
-  const { points, closed, segMode } = sketch
+  const [raw, setRaw] = useState(null) // trazo en curso (crudo)
+  const { strokes, closed } = sketch
 
-  const addPoint = (e) => {
-    if (closed) return
+  const eps = Math.max(w, h) * 0.02
+  const snap = Math.max(w, h) * 0.05
+
+  const toMM = (e) => {
     const r = svgRef.current.getBoundingClientRect()
-    const x = ((e.clientX - r.left) / r.width) * w
-    const y = ((e.clientY - r.top) / r.height) * h
-    onChange({
-      ...sketch,
-      points: [...points, { x, y, curve: segMode === 'curve' && points.length > 0 }],
-    })
+    return {
+      x: Math.min(Math.max(((e.clientX - r.left) / r.width) * w, 0), w),
+      y: Math.min(Math.max(((e.clientY - r.top) / r.height) * h, 0), h),
+    }
+  }
+
+  const onDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setRaw([toMM(e)])
+  }
+  const onMove = (e) => {
+    if (raw) setRaw((rr) => [...rr, toMM(e)])
+  }
+  const onUp = () => {
+    if (!raw) return
+    if (raw.length > 2) {
+      const fitted = fitStroke(raw, eps)
+      // Autocierre: si el final cae cerca del inicio del dibujo, se ajusta
+      const start = strokes[0]?.[0] || fitted[0]
+      const end = fitted[fitted.length - 1]
+      let autoClosed = closed
+      if (Math.hypot(end.x - start.x, end.y - start.y) < snap) {
+        if (strokes.length === 0) fitted[fitted.length - 1] = { ...start, curve: end.curve }
+        autoClosed = true
+      }
+      onChange({ ...sketch, strokes: [...strokes, fitted], closed: autoClosed })
+    }
+    setRaw(null)
   }
 
   const grid = []
   for (let gx = 10; gx < w; gx += 10) grid.push(<line key={`v${gx}`} x1={gx} y1={0} x2={gx} y2={h} />)
   for (let gy = 10; gy < h; gy += 10) grid.push(<line key={`h${gy}`} x1={0} y1={gy} x2={w} y2={gy} />)
 
-  const path = buildSketchPath(points, closed)
+  // Vista previa en vivo: crudo fino + conversión gruesa del trazo en curso
+  const livePath = raw && raw.length > 2 ? buildSketchPath(fitStroke(raw, eps), false) : ''
+  const totalPts = strokes.reduce((n, s) => n + s.length, 0)
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className="inline-flex p-0.5 rounded-full bg-surface border border-divider">
-          {[
-            { v: 'line', l: 'Línea' },
-            { v: 'curve', l: 'Curva' },
-          ].map((t) => (
-            <button
-              key={t.v}
-              type="button"
-              onClick={() => onChange({ ...sketch, segMode: t.v })}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-                segMode === t.v ? 'bg-primary text-white' : 'text-muted hover:text-ink'
-              }`}
-            >
-              {t.l}
-            </button>
-          ))}
-        </div>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary text-white">
+          ✏️ Lápiz
+        </span>
         <button
           type="button"
-          disabled={points.length < 3 || closed}
-          onClick={() => onChange({ ...sketch, closed: true })}
-          className="px-3 py-1 rounded-full text-xs font-semibold border border-divider bg-surface text-ink disabled:opacity-40 hover:border-primary/40"
-        >
-          Cerrar forma
-        </button>
-        <button
-          type="button"
-          disabled={!points.length}
+          disabled={!strokes.length}
           onClick={() =>
-            onChange(
-              closed
-                ? { ...sketch, closed: false }
-                : { ...sketch, points: points.slice(0, -1) }
-            )
+            onChange({ ...sketch, strokes: strokes.slice(0, -1), closed: false })
           }
           className="px-3 py-1 rounded-full text-xs font-semibold border border-divider bg-surface text-ink disabled:opacity-40 hover:border-primary/40"
         >
@@ -299,8 +362,8 @@ function DibujoEspecial({ w, h, sketch, onChange }) {
         </button>
         <button
           type="button"
-          disabled={!points.length}
-          onClick={() => onChange({ ...sketch, points: [], closed: false })}
+          disabled={!strokes.length}
+          onClick={() => onChange({ ...sketch, strokes: [], closed: false })}
           className="px-3 py-1 rounded-full text-xs font-semibold border border-divider bg-surface text-accent disabled:opacity-40 hover:border-accent/40"
         >
           Borrar
@@ -310,34 +373,63 @@ function DibujoEspecial({ w, h, sketch, onChange }) {
       <svg
         ref={svgRef}
         viewBox={`0 0 ${w} ${h}`}
-        onClick={addPoint}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
         className="flex-1 w-full bg-white rounded-xl border border-divider cursor-crosshair"
-        style={{ maxHeight: 320 }}
+        style={{ maxHeight: 320, touchAction: 'none' }}
         role="img"
-        aria-label="Lienzo para dibujar tu suaje"
+        aria-label="Lienzo para dibujar tu suaje a mano alzada"
       >
         {/* Retícula de 10 mm */}
         <g stroke="#16216B" strokeOpacity="0.08" vectorEffect="non-scaling-stroke">
           {grid}
         </g>
         <rect x="0" y="0" width={w} height={h} fill="none" stroke="#16216B" strokeOpacity="0.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
-        {path && (
+
+        {/* Trazos convertidos (gruesos) */}
+        {strokes.map((s, i) => (
           <path
-            d={path}
-            fill={closed ? '#2178C4' : 'none'}
+            key={i}
+            d={buildSketchPath(s, closed && i === 0 && strokes.length === 1)}
+            fill={closed && strokes.length === 1 ? '#2178C4' : 'none'}
             fillOpacity="0.12"
             stroke="#E0382B"
-            strokeWidth="1.5"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {/* Trazo en curso: crudo fino + conversión en vivo gruesa */}
+        {raw && raw.length > 1 && (
+          <polyline
+            points={raw.map((p) => `${p.x},${p.y}`).join(' ')}
+            fill="none"
+            stroke="#16216B"
+            strokeOpacity="0.35"
+            strokeWidth="1"
             vectorEffect="non-scaling-stroke"
           />
         )}
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={Math.max(w, h) / 70} fill={i === 0 ? '#E0382B' : '#16216B'} />
-        ))}
+        {livePath && (
+          <path
+            d={livePath}
+            fill="none"
+            stroke="#E0382B"
+            strokeOpacity="0.8"
+            strokeWidth="2"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
       <p className="mt-2 font-mono text-[10px] text-muted">
-        Haz clic para agregar puntos sobre la retícula de {w}×{h} mm ·{' '}
-        {closed ? 'forma cerrada' : `${points.length} punto${points.length === 1 ? '' : 's'}`}
+        Dibuja tu contorno a mano alzada sobre la retícula de {w}×{h} mm — lo convertimos en
+        líneas y curvas limpias{closed ? ' · forma cerrada automáticamente' : ''}
+        {!closed && totalPts ? ` · ${strokes.length} trazo${strokes.length === 1 ? '' : 's'}` : ''}
       </p>
     </div>
   )
@@ -353,7 +445,7 @@ export default function Cotizador() {
   const [material, setMaterial] = useState(MATERIALES[0].name)
   const [cantidad, setCantidad] = useState('1000')
   const [cantidadCustom, setCantidadCustom] = useState('')
-  const [sketch, setSketch] = useState({ points: [], closed: false, segMode: 'line' })
+  const [sketch, setSketch] = useState({ strokes: [], closed: false })
 
   const suaje = useMemo(() => SUAJES.find((s) => s.code === suajeCode), [suajeCode])
 
@@ -388,17 +480,20 @@ export default function Cotizador() {
       `• Material: ${material}`,
       `• Cantidad: ${cantidadFinal}`,
     ]
-    if (drawMode && sketch.points.length >= 2) {
-      const xs = sketch.points.map((p) => p.x)
-      const ys = sketch.points.map((p) => p.y)
+    const allPts = sketch.strokes.flat()
+    if (drawMode && allPts.length >= 2) {
+      const xs = allPts.map((p) => p.x)
+      const ys = allPts.map((p) => p.y)
       const bw = Math.round(Math.max(...xs) - Math.min(...xs))
       const bh = Math.round(Math.max(...ys) - Math.min(...ys))
       lines.push(
-        `• Forma dibujada por el cliente: ${sketch.points.length} puntos, aprox ${bw}×${bh} mm${
+        `• Forma dibujada por el cliente: ${allPts.length} puntos, aprox ${bw}×${bh} mm${
           sketch.closed ? ' (cerrada)' : ''
         }`
       )
-      const path = buildSketchPath(sketch.points, sketch.closed)
+      const path = sketch.strokes
+        .map((s, i) => buildSketchPath(s, sketch.closed && i === 0 && sketch.strokes.length === 1))
+        .join(' ')
       if (path.length <= 400) lines.push(`• Trazo SVG: ${path}`)
     }
     lines.push('¿Me pueden ayudar?')
@@ -411,7 +506,12 @@ export default function Cotizador() {
   })).filter((g) => g.items.length)
 
   return (
-    <section id="cotizador" ref={ref} className="relative bg-background py-24 sm:py-32 overflow-hidden diecut-pattern">
+    <section
+      id="cotizador"
+      ref={ref}
+      className="relative bg-gradient-to-b from-surface via-background to-background py-24 sm:py-32 overflow-hidden"
+    >
+      <div className="absolute inset-0 diecut-pattern" aria-hidden="true" />
       <GlowLayer />
       <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="max-w-2xl mb-12 cot-reveal">

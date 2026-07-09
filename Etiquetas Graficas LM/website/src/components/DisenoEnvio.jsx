@@ -88,7 +88,11 @@ export default function DisenoEnvio() {
   const [active, setActive] = useState(0)
 
   return (
-    <section id="envio" ref={ref} className="bg-surface py-24 sm:py-32 border-t border-divider">
+    <section
+      id="envio"
+      ref={ref}
+      className="relative bg-gradient-to-b from-background via-surface to-surface py-24 sm:py-32 overflow-hidden"
+    >
       <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="max-w-2xl mb-14 de-reveal">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">
