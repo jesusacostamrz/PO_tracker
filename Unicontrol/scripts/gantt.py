@@ -24,23 +24,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from uc.core import baseline as bl  # noqa: E402
 from uc.core.config import add_hermes_to_path, load_config  # noqa: E402
-from uc.core.customer_view import build as build_customer, is_hierarchical  # noqa: E402
-from uc.core.internal_view import build as build_internal  # noqa: E402
-from uc.render.gantt_html import render_customer_page, render_internal_page  # noqa: E402
+from uc.service.gantt_service import RenderError, has_baseline, norm_view, render  # noqa: E402
 
 add_hermes_to_path()
 from uc.connectors.odoo_project import ProjectOdooClient  # noqa: E402
 
 OUT_DIR = ROOT / "out"
-_VIEWS = {"c": "customer", "customer": "customer", "cliente": "customer",
-          "i": "internal", "internal": "internal", "interno": "internal"}
-
-
-def norm_view(s: str | None) -> str | None:
-    """Map a user token (c/i/customer/interno/…) to 'customer'|'internal' or None."""
-    return _VIEWS.get((s or "").strip().lower())
 
 
 def out_path(view: str, pid: int) -> Path:
@@ -50,38 +40,6 @@ def out_path(view: str, pid: int) -> Path:
 def _fail(msg: str) -> None:
     print(msg, file=sys.stderr)
     raise SystemExit(1)
-
-
-def render_customer_html(odoo, cfg, pid, name, as_of) -> str:
-    tasks = odoo.load_tasks([pid], cfg["odoo_project"])
-    if not tasks:
-        _fail(f"ERROR: [{pid}] {name} has no tasks.")
-    if not is_hierarchical(tasks):
-        _fail(f"ERROR: [{pid}] {name} is flat (no phase hierarchy) — customer view refused "
-              "so internal task detail can't leak. Restructure into parent phases first.")
-    plan = build_customer(tasks, project_name=name, as_of=as_of)
-    if not plan.phases and not plan.milestones:
-        _fail(f"ERROR: [{pid}] {name} has no planned dates.")
-    return render_customer_page(plan)
-
-
-def render_internal_html(odoo, cfg, pid, name, as_of, may_prompt) -> str:
-    tasks = odoo.load_tasks([pid], cfg["odoo_project"])
-    if not tasks:
-        _fail(f"ERROR: [{pid}] {name} has no tasks.")
-    baseline = bl.load(pid)
-    if baseline is None:
-        if may_prompt and _yes(f"  [{pid}] has no approved baseline. Save one now from the "
-                               "current dates? (s/n): "):
-            baseline = bl.snapshot(pid, name, tasks)
-            print(f"  baseline saved -> {bl.save(baseline)}")
-        else:
-            _fail(f"ERROR: no baseline for [{pid}]. Run "
-                  f"scripts/save_baseline.py --project-id {pid} first.")
-    plan = build_internal(tasks, project_name=name, baseline=baseline, as_of=as_of)
-    if not plan.rows:
-        _fail(f"ERROR: [{pid}] {name} has no planned dates.")
-    return render_internal_page(plan)
 
 
 def _yes(prompt: str) -> bool:
@@ -146,10 +104,18 @@ def main() -> int:
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else date.today()
 
-    if view == "customer":
-        html = render_customer_html(odoo, cfg, pid, name, as_of)
-    else:
-        html = render_internal_html(odoo, cfg, pid, name, as_of, may_prompt=interactive)
+    # Interactive internal view: offer to save a baseline when none exists yet.
+    save_bl = False
+    if view == "internal" and interactive and not has_baseline(pid):
+        save_bl = _yes(f"  [{pid}] no tiene línea base. ¿Guardarla ahora desde las fechas "
+                       "actuales? (s/n): ")
+        if not save_bl:
+            _fail(f"ERROR: no baseline for [{pid}]. Run "
+                  f"scripts/save_baseline.py --project-id {pid} first.")
+    try:
+        html = render(odoo, cfg, pid, name, view, as_of, save_baseline_if_missing=save_bl)
+    except RenderError as e:
+        _fail(f"ERROR: {e.message}")
 
     dest = Path(args.out) if args.out else out_path(view, pid)
     dest.parent.mkdir(parents=True, exist_ok=True)
