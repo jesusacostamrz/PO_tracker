@@ -1,40 +1,108 @@
-import { Quote } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Star } from 'lucide-react'
 import { TESTIMONIOS } from '../data/testimonios.js'
-import { useReveal } from './shared.jsx'
+import { prefersReducedMotion } from '../data/site.js'
+import { GlowLayer } from './shared.jsx'
 
+/* Slide deck: una cita grande centrada a la vez, avance automático,
+   flechas, swipe y paginación por puntos. */
 export default function Testimonios() {
-  const ref = useReveal('.testi-card')
+  const [idx, setIdx] = useState(0)
+  const [paused, setPaused] = useState(false)
+  const touchX = useRef(null)
+  const n = TESTIMONIOS.length
+
+  const go = (d) => setIdx((i) => (i + d + n) % n)
+
+  useEffect(() => {
+    if (prefersReducedMotion || paused) return
+    const id = setInterval(() => setIdx((i) => (i + 1) % n), 6000)
+    return () => clearInterval(id)
+  }, [paused, n])
+
+  const t = TESTIMONIOS[idx]
+
   return (
-    <section className="bg-background py-24 sm:py-32" ref={ref}>
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
-        <div className="max-w-2xl mb-14">
-          <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">
-            Testimonios
-          </p>
-          <h2 className="font-display text-3xl sm:text-5xl font-extrabold tracking-tight text-ink text-balance">
-            Lo que dicen nuestros clientes
-          </h2>
+    <section
+      className="relative bg-background py-24 sm:py-32 overflow-hidden diecut-pattern"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <GlowLayer />
+      <div className="relative max-w-4xl mx-auto px-6 sm:px-10 text-center">
+        <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-10">
+          Testimonios
+        </p>
+
+        <div
+          className="select-none"
+          onTouchStart={(e) => {
+            touchX.current = e.touches[0].clientX
+          }}
+          onTouchEnd={(e) => {
+            if (touchX.current == null) return
+            const dx = e.changedTouches[0].clientX - touchX.current
+            if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1)
+            touchX.current = null
+          }}
+        >
+          <div className="flex items-center justify-center gap-1.5 mb-8" aria-hidden="true">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Star key={i} className="h-5 w-5 text-accent" fill="currentColor" />
+            ))}
+          </div>
+
+          <blockquote
+            key={idx}
+            className="font-display text-2xl sm:text-4xl font-bold text-ink tracking-tight leading-snug text-balance min-h-[9rem] sm:min-h-[11rem] flex items-center justify-center"
+            style={{ animation: prefersReducedMotion ? 'none' : 'testi-fadein 0.5s ease-out' }}
+          >
+            “{t.quote}”
+          </blockquote>
+
+          <div className="mt-8">
+            <p className="font-display font-bold text-ink text-lg">{t.name}</p>
+            <p className="text-sm text-muted mt-1">
+              {t.business} · {t.sector}
+            </p>
+          </div>
         </div>
 
-        {/* Carrusel con scroll-snap en móvil, grid en desktop */}
-        <div className="flex lg:grid lg:grid-cols-3 gap-5 overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-6 px-6 lg:mx-0 lg:px-0 lg:overflow-visible">
-          {TESTIMONIOS.map((t) => (
-            <figure
-              key={t.name}
-              className="testi-card snap-center shrink-0 w-[85%] sm:w-[70%] lg:w-auto rounded-3xl bg-surface border border-divider p-7 shadow-sm flex flex-col"
-            >
-              <Quote className="h-8 w-8 text-primary/25 mb-4" />
-              <blockquote className="text-ink leading-relaxed flex-1">“{t.quote}”</blockquote>
-              <figcaption className="mt-6 pt-5 border-t border-divider">
-                <p className="font-display font-bold text-ink">{t.name}</p>
-                <p className="text-sm text-muted">
-                  {t.business} · {t.sector}
-                </p>
-              </figcaption>
-            </figure>
-          ))}
+        <div className="mt-10 flex items-center justify-center gap-6">
+          <button
+            onClick={() => go(-1)}
+            aria-label="Testimonio anterior"
+            className="h-10 w-10 rounded-full border border-divider bg-surface flex items-center justify-center text-ink hover:border-primary/50 hover:text-primary transition-colors"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="flex items-center gap-2.5">
+            {TESTIMONIOS.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setIdx(i)}
+                aria-label={`Ir al testimonio ${i + 1}`}
+                className={`rounded-full transition-all duration-300 ${
+                  i === idx ? 'h-2.5 w-7 bg-accent' : 'h-2.5 w-2.5 bg-divider hover:bg-muted/50'
+                }`}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => go(1)}
+            aria-label="Testimonio siguiente"
+            className="h-10 w-10 rounded-full border border-divider bg-surface flex items-center justify-center text-ink hover:border-primary/50 hover:text-primary transition-colors"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
         </div>
       </div>
+      <style>{`
+        @keyframes testi-fadein {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </section>
   )
 }

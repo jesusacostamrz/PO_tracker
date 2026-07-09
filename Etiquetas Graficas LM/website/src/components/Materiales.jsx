@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Droplets, Sparkles, ShieldCheck, ChevronRight } from 'lucide-react'
 import { MATERIALES } from '../data/materiales.js'
-import { ImageFallback, useReveal } from './shared.jsx'
+import { ImageFallback, useReveal, GlowLayer, TiltCard } from './shared.jsx'
 
 const TRAIT_ICONS = [Droplets, Sparkles, ShieldCheck]
 
@@ -98,8 +98,9 @@ export default function Materiales() {
   const ref = useReveal('.mat-card')
 
   return (
-    <section id="materiales" ref={ref} className="bg-background py-24 sm:py-32">
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
+    <section id="materiales" ref={ref} className="relative bg-background py-24 sm:py-32 overflow-hidden">
+      <GlowLayer />
+      <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="max-w-2xl mb-14">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">
             Materiales
@@ -112,24 +113,21 @@ export default function Materiales() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {MATERIALES.map((m) => (
-            <button
+            <TiltCard
               key={m.slug}
+              as="button"
               onClick={() => setActive(m)}
-              className="mat-card group text-left rounded-3xl overflow-hidden bg-surface border border-divider lift-on-hover shadow-sm"
+              className="mat-card text-left rounded-3xl overflow-hidden bg-surface border border-divider shadow-sm"
             >
-              <ImageFallback
-                src={m.image}
-                alt={m.name}
-                className="h-44 w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
+              <ImageFallback src={m.image} alt={m.name} className="h-44 w-full object-cover" />
               <div className="p-6">
                 <h3 className="font-display text-xl font-bold text-ink">{m.name}</h3>
                 <p className="text-muted text-sm mt-1">{m.tagline}</p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary transition-transform duration-300 group-hover:translate-x-1">
                   Ver material <ChevronRight className="h-4 w-4" />
                 </span>
               </div>
-            </button>
+            </TiltCard>
           ))}
         </div>
       </div>

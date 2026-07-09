@@ -14,6 +14,18 @@ export const SECTORES = [
     ],
   },
   {
+    slug: 'bebidas',
+    name: 'Bebidas y licores',
+    image: '/img/sectores/bebidas.jpg',
+    line: 'Etiquetas que aguantan hielera, condensación y barra.',
+    aplicaciones: [
+      'Cerveza artesanal y destilados',
+      'Vinos y licores regionales',
+      'Aguas, jugos y refrescos',
+      'Transparentes “no label look”',
+    ],
+  },
+  {
     slug: 'agricola',
     name: 'Agrícola',
     image: '/img/sectores/agricola.jpg',

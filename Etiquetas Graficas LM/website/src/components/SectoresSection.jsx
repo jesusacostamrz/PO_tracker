@@ -1,14 +1,19 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight } from 'lucide-react'
 import { SECTORES } from '../data/sectores.js'
-import { ImageFallback, useReveal } from './shared.jsx'
+import { ImageFallback, useReveal, GlowLayer, TiltCard } from './shared.jsx'
 
 export default function SectoresSection() {
   const ref = useReveal('.sec-card')
 
   return (
-    <section id="sectores" ref={ref} className="bg-surface py-24 sm:py-32 border-t border-divider">
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
+    <section
+      id="sectores"
+      ref={ref}
+      className="relative bg-surface py-24 sm:py-32 border-t border-divider overflow-hidden diecut-pattern"
+    >
+      <GlowLayer />
+      <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="flex flex-wrap items-end justify-between gap-6 mb-14">
           <div className="max-w-2xl">
             <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">
@@ -26,24 +31,29 @@ export default function SectoresSection() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {/* 8 sectores → filas completas de 2 / 4 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {SECTORES.map((s) => (
-            <Link
-              to="/sectores"
+            <TiltCard
               key={s.slug}
-              className="sec-card group relative rounded-3xl overflow-hidden min-h-[240px] flex items-end border border-divider"
+              as={Link}
+              to="/sectores"
+              className="sec-card relative rounded-3xl overflow-hidden min-h-[250px] flex items-end border border-divider"
             >
               <ImageFallback
                 src={s.image}
                 alt={s.name}
-                className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                className="absolute inset-0 h-full w-full object-cover"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-deep via-deep/40 to-transparent" />
-              <div className="relative p-6 text-white">
-                <h3 className="font-display text-xl font-bold">{s.name}</h3>
-                <p className="text-white/80 text-sm mt-1 leading-snug">{s.line}</p>
+              <div className="absolute inset-0 bg-gradient-to-t from-deep via-deep/35 to-transparent transition-opacity duration-500 group-hover:opacity-90" />
+              <div className="relative p-5 text-white w-full">
+                <h3 className="font-display text-lg font-bold leading-tight">{s.name}</h3>
+                {/* La línea se revela deslizándose al hacer hover */}
+                <p className="text-white/80 text-sm mt-1 leading-snug lg:max-h-0 lg:opacity-0 lg:translate-y-2 overflow-hidden transition-all duration-500 group-hover:max-h-16 group-hover:opacity-100 group-hover:translate-y-0">
+                  {s.line}
+                </p>
               </div>
-            </Link>
+            </TiltCard>
           ))}
         </div>
       </div>

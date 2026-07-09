@@ -31,41 +31,43 @@ function CountUp({ end, suffix = '', duration = 1800 }) {
   )
 }
 
+const STATS = [
+  { end: 20, suffix: '+', label: 'Años de experiencia' },
+  { end: 500, suffix: '+', label: 'Clientes activos' },
+  { end: 10, suffix: 'M+', label: 'Etiquetas impresas' },
+  { end: 98, suffix: '%', label: 'Satisfacción' },
+]
+
+/* Banda azul sólida de ancho completo con 4 estadísticas gigantes. */
 export default function Historia() {
   return (
-    <section className="relative bg-deep text-white py-20 overflow-hidden">
-      <div className="absolute -top-24 -right-24 h-80 w-80 rounded-full bg-primary/25 blur-3xl" />
-      <div className="absolute -bottom-24 -left-24 h-80 w-80 rounded-full bg-accent/15 blur-3xl" />
-      <div className="relative max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 grid lg:grid-cols-3 gap-10 items-center">
-        <div className="lg:col-span-2">
-          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-primary-light mb-4">
+    <section className="relative bg-primary text-white overflow-hidden">
+      <div className="absolute top-0 inset-x-0 h-1 cmyk-strip opacity-80" />
+      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 py-16 sm:py-20">
+        <div className="max-w-3xl mb-12">
+          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/60 mb-4">
             Nuestra historia
           </p>
           <h2 className="font-display text-2xl sm:text-4xl font-extrabold tracking-tight text-balance">
             Veinte años imprimiendo la confianza de Los Mochis
           </h2>
-          <p className="text-white/65 mt-4 max-w-xl leading-relaxed">
-            Somos una imprenta flexográfica local. Dos décadas acompañando a emprendedores y
-            productores del noroeste, con trato cercano y color que se mantiene fiel en cada tiraje.
+          <p className="text-white/70 mt-3 max-w-xl leading-relaxed">
+            Dos décadas acompañando a emprendedores y productores del noroeste, con trato cercano y
+            color que se mantiene fiel en cada tiraje.
           </p>
         </div>
-        <div className="flex gap-10">
-          <div>
-            <div className="font-display text-6xl font-extrabold tracking-tighter">
-              <CountUp end={25} suffix="" />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-10">
+          {STATS.map((s) => (
+            <div key={s.label}>
+              <div className="font-display text-5xl sm:text-7xl font-extrabold tracking-tighter">
+                <CountUp end={s.end} suffix={s.suffix} />
+              </div>
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-white/60 mt-3">
+                {s.label}
+              </p>
             </div>
-            <p className="font-mono text-[11px] uppercase tracking-widest text-white/50 mt-2">
-              años de oficio
-            </p>
-          </div>
-          <div>
-            <div className="font-display text-6xl font-extrabold tracking-tighter">
-              <CountUp end={100} suffix="%" />
-            </div>
-            <p className="font-mono text-[11px] uppercase tracking-widest text-white/50 mt-2">
-              color fiel
-            </p>
-          </div>
+          ))}
         </div>
       </div>
     </section>

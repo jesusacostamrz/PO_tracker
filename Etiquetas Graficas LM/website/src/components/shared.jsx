@@ -53,3 +53,71 @@ export function useReveal(selector = '.reveal', opts = {}) {
   }, [selector])
   return ref
 }
+
+/* Capa de fondo interactiva: brillo radial que sigue al cursor dentro de la
+   sección padre. Solo transform/vars CSS — sin layout thrash. */
+export function GlowLayer({ color = '33,120,196', opacity = 0.09 }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (prefersReducedMotion) return
+    const el = ref.current
+    const parent = el?.parentElement
+    if (!parent) return
+    const onMove = (e) => {
+      const r = parent.getBoundingClientRect()
+      el.style.setProperty('--mx', `${e.clientX - r.left}px`)
+      el.style.setProperty('--my', `${e.clientY - r.top}px`)
+      el.style.opacity = '1'
+    }
+    const onLeave = () => {
+      el.style.opacity = '0'
+    }
+    parent.addEventListener('mousemove', onMove)
+    parent.addEventListener('mouseleave', onLeave)
+    return () => {
+      parent.removeEventListener('mousemove', onMove)
+      parent.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])
+  return (
+    <div
+      ref={ref}
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 transition-opacity duration-500 opacity-0"
+      style={{
+        background: `radial-gradient(560px circle at var(--mx, 50%) var(--my, 50%), rgba(${color},${opacity}), transparent 65%)`,
+      }}
+    />
+  )
+}
+
+/* Tarjeta con tilt 3D que sigue al mouse + barrido de brillo (sheen).
+   Solo transform/opacity. Respeta prefers-reduced-motion. */
+export function TiltCard({ children, className = '', max = 7, as: Tag = 'div', ...rest }) {
+  const ref = useRef(null)
+  const onMove = (e) => {
+    if (prefersReducedMotion) return
+    const el = ref.current
+    const r = el.getBoundingClientRect()
+    const px = (e.clientX - r.left) / r.width
+    const py = (e.clientY - r.top) / r.height
+    el.style.transform = `perspective(900px) rotateX(${(0.5 - py) * max}deg) rotateY(${(px - 0.5) * max}deg) translateY(-2px)`
+    el.style.setProperty('--shx', `${px * 100}%`)
+    el.style.setProperty('--shy', `${py * 100}%`)
+  }
+  const onLeave = () => {
+    if (ref.current) ref.current.style.transform = ''
+  }
+  return (
+    <Tag
+      ref={ref}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      className={`eg-tilt group ${className}`}
+      {...rest}
+    >
+      {children}
+      <span aria-hidden="true" className="eg-sheen" />
+    </Tag>
+  )
+}

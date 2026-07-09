@@ -6,6 +6,7 @@ import Hero from './components/Hero.jsx'
 import Materiales from './components/Materiales.jsx'
 import SectoresSection from './components/SectoresSection.jsx'
 import Cotizador from './components/Cotizador.jsx'
+import Proceso from './components/Proceso.jsx'
 import Clientes from './components/Clientes.jsx'
 import Testimonios from './components/Testimonios.jsx'
 import DisenoEnvio from './components/DisenoEnvio.jsx'
@@ -29,6 +30,7 @@ export default function App() {
         <Materiales />
         <SectoresSection />
         <Cotizador />
+        <Proceso />
         <Clientes />
         <Testimonios />
         <DisenoEnvio />

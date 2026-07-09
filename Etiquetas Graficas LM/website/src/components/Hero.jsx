@@ -14,6 +14,7 @@ export default function Hero() {
     const ctx = gsap.context(() => {
       gsap.from('.hero-line-1', { y: 40, opacity: 0, duration: 1, delay: 0.3, ease: 'power3.out' })
       gsap.from('.hero-line-2', { y: 60, opacity: 0, duration: 1.2, delay: 0.5, ease: 'power3.out' })
+      gsap.from('.hero-rolls', { x: 70, opacity: 0, duration: 1.2, delay: 0.7, ease: 'power3.out' })
       gsap.from('.hero-meta, .hero-cta', {
         y: 24,
         opacity: 0,
@@ -55,6 +56,25 @@ export default function Hero() {
       <div className="absolute inset-0 bg-gradient-to-br from-deep/90 via-deep/55 to-primary/60" />
       <div className="absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-deep to-transparent" />
       <div className="absolute top-0 inset-x-0 h-1 cmyk-strip opacity-90" />
+
+      {/* Rollos de etiquetas — recorte flotante en primer plano (solo desktop) */}
+      <div className="hero-rolls hidden lg:block absolute right-14 xl:right-24 bottom-28 z-10 w-[290px] xl:w-[330px] rotate-2 animate-float">
+        <div className="relative rounded-3xl overflow-hidden border border-white/25 shadow-2xl shadow-deep/60 bg-deep/40 backdrop-blur-sm">
+          <img
+            src="/img/hero-rolls.jpg"
+            alt="Rollos de etiquetas a color apilados"
+            className="w-full aspect-[3/4] object-cover"
+            onError={(e) => {
+              e.currentTarget.closest('.hero-rolls').style.display = 'none'
+            }}
+          />
+          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-deep/80 to-transparent" />
+          <p className="absolute bottom-3 left-4 right-4 font-mono text-[10px] uppercase tracking-[0.2em] text-white/80">
+            Recién salidas de prensa
+          </p>
+          <div className="absolute top-0 inset-x-0 h-1 cmyk-strip" />
+        </div>
+      </div>
 
       <div className="relative z-10 max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 pt-32 pb-24 min-h-[100dvh] flex flex-col justify-end">
         <p className="hero-meta font-mono text-[11px] sm:text-xs uppercase tracking-[0.25em] text-white/70 mb-6">
