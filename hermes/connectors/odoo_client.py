@@ -152,6 +152,51 @@ class OdooClient:
         self.execute("sale.order", "write", [order_id], {"note": new})
         return True
 
+    # ---- products & quotations (Hermes Quotes) ----
+    def all_products(self, limit=10000) -> list[dict]:
+        return self.search_read(
+            "product.product", [["sale_ok", "=", True]],
+            ["default_code", "name", "list_price"], limit=limit,
+        )
+
+    def create_draft_quote(self, partner_id: int, lines: list[dict], client_ref: str = "") -> int:
+        """Create a DRAFT sale.order. Never confirms it. Omit price_unit in a line
+        to let Odoo price it from the pricelist."""
+        vals = {"partner_id": partner_id, "order_line": [(0, 0, l) for l in lines]}
+        if client_ref:
+            vals["client_order_ref"] = client_ref
+        return self.execute("sale.order", "create", vals)
+
+    def add_quote_lines(self, order_id: int, lines: list[dict]) -> bool:
+        return self.execute("sale.order", "write", [order_id],
+                            {"order_line": [(0, 0, l) for l in lines]})
+
+    def create_product(self, name: str, default_code: str = "", list_price: float = 0.0) -> int:
+        vals = {"name": name, "sale_ok": True, "list_price": list_price}
+        if default_code:
+            vals["default_code"] = default_code
+        return self.execute("product.product", "create", vals)
+
+    def product_tmpl_id(self, product_id: int) -> int:
+        rec = self.execute("product.product", "read", [product_id], ["product_tmpl_id"])
+        v = rec[0]["product_tmpl_id"]
+        return v[0] if isinstance(v, (list, tuple)) else v
+
+    def ensure_vendor(self, name: str) -> int:
+        recs = self.search_read("res.partner", [["name", "=", name]], ["name"], limit=1)
+        if recs:
+            return recs[0]["id"]
+        return self.execute("res.partner", "create", {"name": name, "is_company": True})
+
+    def upsert_supplierinfo(self, tmpl_id: int, partner_id: int, price: float) -> None:
+        dom = [["product_tmpl_id", "=", tmpl_id], ["partner_id", "=", partner_id]]
+        recs = self.search_read("product.supplierinfo", dom, ["price"], limit=1)
+        if recs:
+            self.execute("product.supplierinfo", "write", [recs[0]["id"]], {"price": price})
+        else:
+            self.execute("product.supplierinfo", "create",
+                         {"product_tmpl_id": tmpl_id, "partner_id": partner_id, "price": price})
+
     # ---- factory ----
     @classmethod
     def from_config(cls, cfg: dict) -> "OdooClient":
