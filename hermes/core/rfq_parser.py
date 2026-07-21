@@ -89,7 +89,7 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
     else:
         result = {"customer_name": None, "rfq_ref": None, "line_items": [], "_source": "empty"}
 
-    result.setdefault("line_items", [])
+    result["line_items"] = [li for li in (result.get("line_items") or []) if isinstance(li, dict)]
     # normalize lines defensively — downstream indexes these keys
     for li in result["line_items"]:
         li["part_number"] = (li.get("part_number") or None)
