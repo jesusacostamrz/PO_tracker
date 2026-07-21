@@ -1,7 +1,8 @@
 """Action layer for RFQs: (rfq, line matches) -> Odoo draft quotation + Tracker rows.
 
 Mirrors core/actions.py doctrine: honors runtime.dry_run; idempotency keyed on the
-Gmail message id in the Quotes tab (a live row blocks, a dry-run row is upserted);
+Gmail message id in the Quotes tab (a row that created an Odoo order blocks;
+dry-run and needs-review rows are upserted);
 human-owned cells (Quotes col K) are never overwritten. Pricing Queue rows are only
 written on LIVE runs — a dry-run logs intent to Audit instead. NEVER confirms or
 sends anything.
