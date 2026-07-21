@@ -68,6 +68,30 @@ AUDIT_DROPDOWNS = {
     5: ["live", "dry-run"],
 }
 
+# Quotes tab: one row per RFQ. Human-owned: Human Notes (K / idx 10).
+QUOTES_HEADERS = [
+    "Received At", "Customer", "RFQ Ref", "Lines",         # 0-3  A-D
+    "Auto-priced", "Queued", "Quote #", "Odoo Quote ID",   # 4-7  E-H
+    "Status", "Gmail Msg ID",                              # 8-9  I-J
+    "Human Notes",                                         # 10   K (human-owned)
+]
+QUOTES_DROPDOWNS = {
+    8: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Dry-run"],
+}
+
+# Pricing Queue: one row per unresolved RFQ line. Human-owned cols M-P (idx 12-15).
+PQ_HEADERS = [
+    "Added At", "Customer", "RFQ Ref", "Quote #", "Odoo Quote ID",   # 0-4  A-E
+    "Part #", "Description", "Qty",                                  # 5-7  F-H
+    "Suggested Product", "Suggested Product ID", "Match Note",       # 8-10 I-K
+    "Status",                                                        # 11   L
+    "Sale Price", "Use Product ID", "Create Product?", "Human Notes",# 12-15 M-P (human-owned)
+]
+PQ_DROPDOWNS = {
+    11: ["Pending", "Resolved", "Error"],   # Status (Hermes-owned)
+    14: ["Yes", "No"],                      # Create Product?
+}
+
 # Dashboard: (label, formula-or-blank). Orders col letters: H=Match Status,
 # M=Ref Written, N=PDF Attached, P=Terms, R=Invoiced(Suggested),
 # T=Human Verified, U=Invoiced(Confirmed), B=PO #. "Matched*" counts both
@@ -165,6 +189,8 @@ def main() -> int:
     _style_orders(sc, sc.sheet_ids()[orders_tab], len(ORDERS_HEADERS))
     _apply(sc, tabs["people"], PEOPLE_HEADERS, PEOPLE_DROPDOWNS)
     _apply(sc, tabs["audit"], AUDIT_HEADERS, AUDIT_DROPDOWNS)
+    _apply(sc, tabs["quotes"], QUOTES_HEADERS, QUOTES_DROPDOWNS)
+    _apply(sc, tabs["pricing_queue"], PQ_HEADERS, PQ_DROPDOWNS)
 
     # Dashboard: KPI list (label col A, value col B); header band on row 1.
     dash = tabs["dashboard"]

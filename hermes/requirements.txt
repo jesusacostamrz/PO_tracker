@@ -16,5 +16,6 @@ rapidfuzz>=3.9
 # Config + env
 pyyaml>=6.0
 python-dotenv>=1.0
+openpyxl
 
 # Odoo uses the stdlib xmlrpc.client — no dependency needed

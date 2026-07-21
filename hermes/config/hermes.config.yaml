@@ -29,6 +29,19 @@ sheets:
     dashboard: Dashboard
     people: Salespeople
     audit: Audit
+    quotes: Quotes
+    pricing_queue: Pricing Queue
+
+rfq:
+  # Team convention: forward RFQ emails with "RFQ" in the subject.
+  poll_query: 'is:unread subject:RFQ -label:Hermes/Processed -label:Hermes/NeedsReview'
+  labels:
+    processed: Hermes/Processed        # reuse existing labels
+    needs_review: Hermes/NeedsReview
+  match:
+    fuzzy_threshold: 88       # >= this token_set_ratio -> candidate match
+    ambiguity_margin: 3       # top-2 scores closer than this -> queue, never guess
+    partner_threshold: 85     # customer-name fuzzy floor to pick the Odoo partner
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.
