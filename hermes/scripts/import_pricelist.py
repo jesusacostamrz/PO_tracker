@@ -71,17 +71,21 @@ def upsert(odoo: OdooClient, sheets, audit_tab, vendor_id, rows, dry) -> tuple[i
     for row in rows:
         key = norm_code(row["part"])
         pid = by_code.get(key)
-        action = "update" if pid else "create"
+        if pid:
+            updated += 1
+        else:
+            created += 1
         if dry:
+            action = "update" if pid else "create"
             print(f"  [SIM] {action}: {row['part']:<20} cost={row['cost']:<10} sale={row['sale_price']}")
+            by_code.setdefault(key, -1)  # repeated SKU in the file counts as update, like live
         else:
             if pid is None:
                 pid = odoo.create_product(row["description"] or row["part"],
                                           default_code=row["part"], list_price=row["sale_price"])
-                created += 1
+                by_code[key] = pid  # repeated SKU later in the file updates, not re-creates
             else:
                 odoo.execute("product.product", "write", [pid], {"list_price": row["sale_price"]})
-                updated += 1
             odoo.upsert_supplierinfo(odoo.product_tmpl_id(pid), vendor_id, row["cost"])
     sheets.append_row(audit_tab, [_now(), "pricebook", "import_pricelist",
                                   f"{len(rows)} row(s): {created} created, {updated} updated",
