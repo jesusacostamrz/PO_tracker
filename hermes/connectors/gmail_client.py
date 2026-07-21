@@ -88,6 +88,49 @@ class GmailClient:
         walk(msg.get("payload", {}))
         return out
 
+    def attachments_by_ext(self, msg: dict, exts: tuple[str, ...]) -> list[tuple[str, bytes]]:
+        """[(filename, bytes)] for attachments whose name ends with one of ``exts``."""
+        out: list[tuple[str, bytes]] = []
+
+        def walk(part: dict) -> None:
+            filename = part.get("filename") or ""
+            body = part.get("body", {})
+            if filename.lower().endswith(exts) and body.get("attachmentId"):
+                data = (
+                    self.service.users().messages().attachments()
+                    .get(userId="me", messageId=msg["id"], id=body["attachmentId"])
+                    .execute()
+                )
+                out.append((filename, base64.urlsafe_b64decode(data["data"])))
+            for sub in part.get("parts") or []:
+                walk(sub)
+
+        walk(msg.get("payload", {}))
+        return out
+
+    @staticmethod
+    def body_text(msg: dict) -> str:
+        """Best-effort message body as plain text: text/plain preferred, else de-tagged HTML."""
+        import re
+        texts: dict[str, list[str]] = {"text/plain": [], "text/html": []}
+
+        def walk(part: dict) -> None:
+            mime = part.get("mimeType", "")
+            data = part.get("body", {}).get("data")
+            if mime in texts and data and not part.get("filename"):
+                texts[mime].append(base64.urlsafe_b64decode(data).decode("utf-8", "replace"))
+            for sub in part.get("parts") or []:
+                walk(sub)
+
+        walk(msg.get("payload", {}))
+        if texts["text/plain"]:
+            return "\n".join(texts["text/plain"]).strip()
+        html = "\n".join(texts["text/html"])
+        # ponytail: regex tag-strip is enough for RFQ tables; the LLM tolerates messy text
+        html = re.sub(r"</(tr|p|div|table|br)>", "\n", html, flags=re.I)
+        html = re.sub(r"</td>", "\t", html, flags=re.I)
+        return re.sub(r"<[^>]+>", " ", html).strip()
+
     # ---- label helpers (gmail.modify) ----
     def ensure_label(self, name: str) -> str:
         """Return the labelId for ``name``, creating the (possibly nested) label if missing.
