@@ -69,7 +69,8 @@ def run_once(odoo, sheets, cfg, dry) -> int:
             continue
         price = _num(_cell(r, PQ_PRICE))
         use_id = _cell(r, PQ_USE_ID)
-        create = _cell(r, PQ_CREATE).lower() == "yes"
+        # An explicit product id wins over a stray Create?=Yes — never duplicate a product.
+        create = _cell(r, PQ_CREATE).lower() == "yes" and not use_id
         if price is None or not (use_id or create):
             continue  # human hasn't finished this row
 

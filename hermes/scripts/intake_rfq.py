@@ -27,19 +27,25 @@ from connectors.odoo_client import OdooClient, OdooError         # noqa: E402
 from connectors.sheets_client import SheetsClient, SheetsError   # noqa: E402
 
 XLSX_EXTS = (".xlsx", ".xlsm")
+CSV_EXTS = (".csv",)
 IMG_EXTS = (".png", ".jpg", ".jpeg")
 
 
 def _sources_from_message(gm: GmailClient, full: dict) -> list[tuple[str, str, bytes | str]]:
-    """Collect RFQ content: spreadsheets first, then images, then the email body."""
+    """Collect RFQ content: spreadsheet/CSV attachments first, then images, then
+    the email body — only when there is no attachment at all (an attached list is
+    authoritative; body prose would otherwise shadow the vision path)."""
     sources: list[tuple[str, str, bytes | str]] = []
     for fn, data in gm.attachments_by_ext(full, XLSX_EXTS):
         sources.append(("xlsx", fn, data))
+    for fn, data in gm.attachments_by_ext(full, CSV_EXTS):
+        sources.append(("text", fn, data.decode("utf-8", "replace")))
     for fn, data in gm.attachments_by_ext(full, IMG_EXTS):
         sources.append(("image", fn, data))
-    body = gm.body_text(full)
-    if body and not any(k == "xlsx" for k, _, _ in sources):
-        sources.append(("text", "email-body", body))
+    if not sources:
+        body = gm.body_text(full)
+        if body:
+            sources.append(("text", "email-body", body))
     return sources
 
 
@@ -65,7 +71,8 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
     matches = match_lines(rfq["line_items"], products, cfg["rfq"]["match"])
     out = apply_rfq(odoo, sheets, cfg, rfq, matches, gmail_msg_id=msg_id, dry_run=dry)
 
-    clean = out.queued == 0 and out.status in ("Draft Created", "Dry-run") and not out.skipped
+    # skipped = already tracked by a prior live run -> it was handled; label Processed.
+    clean = out.skipped or (out.queued == 0 and out.status in ("Draft Created", "Dry-run"))
     if not dry:
         gm.apply_label(msg_id, labels["processed"] if clean else labels["needs_review"],
                        mark_read=mark_read)
