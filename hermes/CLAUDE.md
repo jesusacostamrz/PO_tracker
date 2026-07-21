@@ -27,6 +27,13 @@ python scripts/setup_sheet.py      # build/repair the Tracker tabs (idempotent, 
 python scripts/process_po.py <po.pdf> [--live] [--odoo-db NAME] [--gmail-msg-id ID]
 python scripts/intake.py [--live] [--odoo-db NAME] [--max N] [--watch SECONDS] [--mark-read]
 python scripts/apply_manual.py [--live] [--odoo-db NAME]   # apply Odoo writes for rows a human resolved via Manual SO # (col K)
+
+# Quotes pipeline (RFQ -> draft Odoo quotation). Same dry-run defaults.
+python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt> [--live]   # local test bench
+python scripts/intake_rfq.py [--live] [--max N] [--watch SECONDS]        # Gmail batch (subject contains "RFQ")
+python scripts/apply_quotes.py [--live]              # apply human pricing from the Pricing Queue tab
+python scripts/import_pricelist.py --brand <key> <lista.xlsx> [--live]   # distributor price list -> Odoo catalog
+# offline self-checks (no network): test_rfq_gmail, test_rfq_parse, test_product_match, test_pricelist
 ```
 
 There is no test framework, linter, or build step — `scripts/test_*.py` are hand-run
@@ -57,6 +64,12 @@ Three layers, deliberately separated:
     can't drift. Fetches the candidate-quote pool ONCE per batch and reuses it; per-PO it
     mutates each quote's `_lines` in place (candidates get real lines, others `[]`).
   - `actions.py` — turns a `(PO, MatchResult)` into Odoo writes + Tracker rows.
+  - `rfq_parser.py` / `product_matcher.py` / `quote_actions.py` — the quotes pipeline:
+    RFQ (xlsx/csv/image/email body) → line items → Odoo product matches (exact
+    `default_code`, then fuzzy; ambiguity or no sale price → Pricing Queue) → draft
+    quotation + Quotes/Pricing Queue tabs. `import_pricelist.py` upserts distributor
+    Excel lists into the catalog (dedup on part# stored as internal reference; cost →
+    `product.supplierinfo`; sale price = cost × brand markup from `pricebook:` config).
 - `scripts/` — thin CLI entrypoints (`process_po.py` single PDF, `intake.py` Gmail batch).
 
 ## Invariants — do not violate
@@ -78,6 +91,13 @@ Three layers, deliberately separated:
   run. Re-polling never double-writes.
 - Only a **confident (`matched`)** result populates Quote/SO #, Odoo SO ID, and
   Salesperson. A `needs_review` best-guess must leave those blank.
+- **Quotes pipeline:** Hermes creates DRAFT quotations only — never sends one to a
+  customer. Quotes-tab reprocessing is blocked only by a row with an Odoo Quote ID
+  (dry-run and Needs-Review rows are upserted). Pricing Queue rows are written on live
+  runs only; human-owned cells are Quotes col K and Pricing Queue cols M:P. Column
+  constants in `core/quote_actions.py` and `scripts/apply_quotes.py` MUST stay in
+  lockstep with `QUOTES_HEADERS`/`PQ_HEADERS` in `scripts/setup_sheet.py`. Products are
+  never created without a price-list entry or explicit human approval in the queue.
 
 ## Secrets & config
 
