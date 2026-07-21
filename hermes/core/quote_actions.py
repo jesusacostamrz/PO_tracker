@@ -18,7 +18,7 @@ from core.actions import _now
 from core.product_matcher import LineMatch
 
 # Quotes tab column indices (0-based). Lockstep with QUOTES_HEADERS in setup_sheet.py.
-Q_STATUS, Q_GMAIL_MSG = 8, 9
+Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 7, 8, 9
 
 
 @dataclass
@@ -50,13 +50,19 @@ def _find_partner(odoo: OdooClient, name: str, threshold: int) -> dict | None:
 
 
 def _find_existing(sheets: SheetsClient, tab: str, msg_id: str):
-    """(row_1based, is_dry) for a prior Quotes row with this Gmail msg id, else None."""
+    """(row_1based, blocking) for a prior Quotes row with this Gmail msg id, else None.
+
+    A row BLOCKS reprocessing only if it did real Odoo work — i.e. it has an Odoo
+    Quote ID (written on live runs only). Dry-run rows and Needs-Review rows (no
+    order created in either mode) are upserted in place by a later run.
+    """
     if not msg_id:
         return None
     rows = sheets.read(f"{tab}!A2:K")
     for i, r in enumerate(rows):
         if len(r) > Q_GMAIL_MSG and r[Q_GMAIL_MSG] == msg_id:
-            return (i + 2, (r[Q_STATUS] if len(r) > Q_STATUS else "") == "Dry-run")
+            has_order = bool(str(r[Q_ORDER_ID] if len(r) > Q_ORDER_ID else "").strip())
+            return (i + 2, has_order)
     return None
 
 
@@ -87,8 +93,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
     existing = _find_existing(sheets, quotes_tab, gmail_msg_id)
     existing_row = None
     if existing:
-        existing_row, was_dry = existing
-        if not was_dry:
+        existing_row, blocking = existing
+        if blocking:
             out.skipped = True
             out.log("RFQ already tracked (live Quotes row) — skipped.")
             _audit("sheet_upsert", f"RFQ msg {gmail_msg_id} already tracked (row {existing_row})", "skipped")
@@ -99,7 +105,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
     if not partner:
         out.status = "Needs Review"
         out.log(f"Customer '{customer or '?'}' not found in Odoo — no draft created.")
-        _audit("needs_review", f"no Odoo partner for '{customer}'", "ok")
+        _audit("needs_review", f"no Odoo partner for '{customer}' "
+                               f"({len(auto)} auto, {len(queue)} unpriced line(s) on hold)", "ok")
     else:
         lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"]}
                  for m in auto]  # no price_unit: Odoo prices from the pricelist
