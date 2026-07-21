@@ -43,8 +43,10 @@ def _num(s: str) -> float | None:
 
 
 def _refresh_quotes_row(sheets, quotes_tab, pq_rows, order_id) -> None:
+    # Error rows still need human attention — a quote is only Complete when none remain.
     pending = sum(1 for r in pq_rows
-                  if _cell(r, PQ_ORDER_ID) == str(order_id) and _cell(r, PQ_STATUS) == "Pending")
+                  if _cell(r, PQ_ORDER_ID) == str(order_id)
+                  and _cell(r, PQ_STATUS) in ("Pending", "Error"))
     qrows = sheets.read(f"{quotes_tab}!A2:K")
     for i, r in enumerate(qrows):
         if _cell(r, Q_ORDER_ID) == str(order_id):
@@ -73,7 +75,8 @@ def run_once(odoo, sheets, cfg, dry) -> int:
 
         order_id = _num(_cell(r, PQ_ORDER_ID))
         desc, part = _cell(r, PQ_DESC), _cell(r, PQ_PART)
-        qty = _num(_cell(r, PQ_QTY)) or 1.0
+        qty_raw = _num(_cell(r, PQ_QTY))
+        qty = 1.0 if qty_raw is None else qty_raw
 
         def _audit(action, detail, result):
             sheets.append_row(audit_tab, [_now(), part or desc[:30], action, detail, result, run_mode])
@@ -108,6 +111,7 @@ def run_once(odoo, sheets, cfg, dry) -> int:
         except Exception as exc:
             sheets.update_range(f"{pq_tab}!L{rownum}", [["Error"]])
             _audit("error", f"PQ row {rownum}: {type(exc).__name__}: {exc}", "error")
+            touched_orders.add(int(order_id))  # refresh its Quotes row too
             print(f"  row {rownum}: ERROR {exc}")
 
     if not dry and touched_orders:
