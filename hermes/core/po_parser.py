@@ -64,6 +64,7 @@ company that issued the PO (the letterhead/issuer at the top; labeled buyer/comp
 
 Return ONLY a JSON object (use null where a field is absent):
 {{
+  "doc_type": string,                 // "purchase_order" | "quote" | "invoice" | "other" — what this document actually IS
   "customer_name": string,            // the BUYER that issued the PO — never our own company
   "po_number": string,                // the BUYER's PO number (labeled "Orden de Compra"/"Purchase Order", often like "PO-290810") — NOT a supplier/proveedor account code
   "supplier_quote_ref": string,       // OUR quotation/cotización number the customer cites, if any (e.g. "S02946"); else null
@@ -84,6 +85,10 @@ Return ONLY a JSON object (use null where a field is absent):
 }}
 
 Rules:
+- doc_type FIRST: only a purchase order ISSUED BY THE BUYER is "purchase_order". A quotation/
+  cotización (including OUR own quotes, e.g. "S02946", or a supplier's quote) is "quote"; a
+  factura/invoice is "invoice"; anything else (delivery note, spec sheet, ...) is "other".
+  Still fill the other fields as best you can regardless of doc_type.
 - Dates -> ISO YYYY-MM-DD. Day-first (DD/MM/YYYY) is common on Mexican POs.
 - Numbers: strip currency symbols and thousands separators; dot decimal; numeric fields must be numbers, not strings.
 - The document may be bilingual (Spanish/English). Ignore generic Terms & Conditions / legal boilerplate.

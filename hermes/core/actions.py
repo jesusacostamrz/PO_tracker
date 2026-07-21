@@ -88,7 +88,13 @@ def _find_existing(sheets: SheetsClient, orders_tab: str, po_number: str, msg_id
     for i, r in enumerate(rows):
         existing_po = r[0] if len(r) > 0 else ""
         existing_msg = r[17] if len(r) > 17 else ""
-        if (po_number and existing_po == po_number) or (msg_id and existing_msg and existing_msg == msg_id):
+        # PO# is the primary key. The Gmail msg id only dedupes POs with NO number —
+        # a msg-id-alone match would wrongly block the 2nd+ PDF of a multi-PDF email.
+        # ponytail: two no-number POs in one email still collide; add filename to the
+        # sheet key if that ever happens for real.
+        if (po_number and existing_po == po_number) or (
+            not po_number and msg_id and existing_msg and existing_msg == msg_id
+        ):
             # cols M/N/O/P (Ref/PDF/Chatter/Terms) are at window indices 11/12/13/14
             is_dry = any((r[j] if len(r) > j else "") == "Dry-run" for j in (11, 12, 13, 14))
             return (i + 2, is_dry)

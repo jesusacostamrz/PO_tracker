@@ -67,10 +67,14 @@ def _process_message(gm, odoo, sheets, cfg, llm, quotes, msg_id, dry, mark_read,
         return
 
     email_meta = {"from": h.get("from", ""), "subject": h.get("subject", ""), "date": h.get("date", "")}
-    results = []  # (po_number, match_status, outcome)
+    results = []  # (po_number-or-filename, match_status, outcome-or-None)
     for filename, pdf_bytes in pdfs:
         st.pdfs += 1
         po = parse_po(pdf_bytes, llm, cfg.get("company", {}))
+        doc_type = po.get("doc_type") or "purchase_order"  # missing field -> assume PO (fail open)
+        if doc_type != "purchase_order":
+            results.append((filename, f"ignored ({doc_type})", None))
+            continue
         res = match_po_to_quotes(odoo, cfg, po, quotes)
         out = apply_match(
             odoo, sheets, cfg, po, res, pdf_bytes,
@@ -80,7 +84,10 @@ def _process_message(gm, odoo, sheets, cfg, llm, quotes, msg_id, dry, mark_read,
         if out.skipped:
             st.skipped += 1
 
-    all_matched = all(status == "matched" for _, status, _ in results)
+    # Non-PO attachments (quotes, invoices, ...) don't count against the email —
+    # but an email whose PDFs are ALL non-PO has nothing to track: needs review.
+    po_statuses = [status for _, status, out in results if out is not None]
+    all_matched = bool(po_statuses) and all(status == "matched" for status in po_statuses)
     if all_matched:
         st.matched += 1
         target = labels["processed"]

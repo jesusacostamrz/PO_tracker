@@ -44,6 +44,11 @@ def main() -> int:
     llm = LLMClient.from_config(cfg)
     pdf_bytes = pdf_path.read_bytes()
     po = parse_po(pdf_bytes, llm, cfg.get("company", {}))
+    doc_type = po.get("doc_type") or "purchase_order"
+    if doc_type != "purchase_order":
+        print(f"NOT A PO — document classified as '{doc_type}' "
+              f"({po.get('customer_name')}, ref {po.get('po_number') or '-'}). Nothing written.")
+        return 3
     print(f"Parsed PO {po.get('po_number')} — {po.get('customer_name')} "
           f"({po.get('subtotal')} {po.get('currency')})")
 
