@@ -78,3 +78,15 @@ reminders:
 runtime:
   dry_run: true                     # start safe: log intended actions, write nothing
   log_level: INFO
+
+pricebook:
+  default_markup_pct: 25
+  brands:
+    acme:                              # key used as --brand acme
+      vendor_name: "ACME Distribution" # res.partner created/reused as the vendor
+      markup_pct: 25                   # sale = cost * (1 + pct/100)
+      header_row: 1                    # 1-based row holding the column headers
+      columns:                         # header CELL TEXT (exact, case-insensitive)
+        part: "Part Number"
+        description: "Description"
+        cost: "Net Price"
