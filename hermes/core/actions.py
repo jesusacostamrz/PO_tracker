@@ -95,6 +95,82 @@ def _find_existing(sheets: SheetsClient, orders_tab: str, po_number: str, msg_id
     return None
 
 
+def annotate_odoo(
+    odoo: OdooClient,
+    write: dict,
+    q: dict,
+    po_number: str,
+    pdf_bytes: bytes,
+    filename: str,
+    confidence: str,
+    email_meta: dict | None,
+    dry: bool,
+    out: ActionOutcome,
+    audit,
+) -> None:
+    """The four narrow Odoo writes on quote ``q`` (or their dry-run simulation).
+
+    Shared by the automatic matched path (apply_match) and the manual resolver
+    (scripts/apply_manual.py). Never confirms the Sales Order. ``audit`` is a
+    callable(action, detail, result).
+    """
+    oid = q["id"]
+    if write.get("customer_ref_field") and po_number:
+        if dry:
+            out.ref_written = "Dry-run"
+            audit("odoo_write_ref", f"would set client_order_ref={po_number} on {q['name']}", "dry-run")
+        else:
+            odoo.set_client_order_ref(oid, po_number)
+            out.ref_written = "Yes"
+            audit("odoo_write_ref", f"set client_order_ref={po_number} on {q['name']}", "ok")
+
+    if write.get("po_in_terms") and po_number:
+        if dry:
+            out.terms_updated = "Dry-run"
+            audit("odoo_set_terms", f"would append 'PO Cliente: {po_number}' to T&C of {q['name']}", "dry-run")
+        else:
+            wrote = odoo.set_terms_po(oid, po_number)
+            out.terms_updated = "Yes" if wrote else "No"
+            audit("odoo_set_terms",
+                  f"{'appended' if wrote else 'already present:'} 'PO Cliente: {po_number}' in T&C of {q['name']}",
+                  "ok")
+
+    if write.get("attach_pdf") and pdf_bytes:
+        attach_name = _attachment_name(po_number, filename)  # save as PO-<#>.pdf
+        if dry:
+            out.pdf_attached = "Dry-run"
+            audit("odoo_attach_pdf", f"would attach as {attach_name} ({len(pdf_bytes)} bytes) to {q['name']}", "dry-run")
+        else:
+            out.attachment_id = odoo.attach_pdf(oid, attach_name, pdf_bytes)
+            out.pdf_attached = "Yes"
+            audit("odoo_attach_pdf", f"attached as {attach_name} (id={out.attachment_id}) to {q['name']}", "ok")
+
+    if write.get("post_chatter_note"):
+        # Plain text (no HTML): Odoo escapes a str body and converts newlines to
+        # <br>, so tags would render literally — see read-back of stored body.
+        meta = email_meta or {}
+        lines = [
+            f"Hermes: linked customer PO {po_number or '(no #)'} to this quotation "
+            f"(match confidence {confidence})."
+        ]
+        sender = _sender_line(meta.get("from", ""))
+        if sender:
+            lines.append(f"Received from: {sender}.")
+        if meta.get("subject"):
+            lines.append(f'Email subject: "{meta["subject"]}".')
+        if out.pdf_attached in ("Yes", "Dry-run"):
+            lines.append("PDF attached.")
+        lines.append("Not confirmed — for the salesperson to review.")
+        body = "\n".join(lines)
+        if dry:
+            out.chatter_posted = "Dry-run"
+            audit("odoo_chatter", f"would post chatter note on {q['name']}", "dry-run")
+        else:
+            odoo.post_chatter(oid, body)
+            out.chatter_posted = "Yes"
+            audit("odoo_chatter", f"posted chatter note on {q['name']}", "ok")
+
+
 def apply_match(
     odoo: OdooClient,
     sheets: SheetsClient,
@@ -145,61 +221,8 @@ def apply_match(
 
     # --- confident match: perform (or simulate) the Odoo writes ---
     if match.status == "matched" and q:
-        oid = q["id"]
-        if write.get("customer_ref_field") and po_number:
-            if dry:
-                out.ref_written = "Dry-run"
-                _audit("odoo_write_ref", f"would set client_order_ref={po_number} on {q['name']}", "dry-run")
-            else:
-                odoo.set_client_order_ref(oid, po_number)
-                out.ref_written = "Yes"
-                _audit("odoo_write_ref", f"set client_order_ref={po_number} on {q['name']}", "ok")
-
-        if write.get("po_in_terms") and po_number:
-            if dry:
-                out.terms_updated = "Dry-run"
-                _audit("odoo_set_terms", f"would append 'PO Cliente: {po_number}' to T&C of {q['name']}", "dry-run")
-            else:
-                wrote = odoo.set_terms_po(oid, po_number)
-                out.terms_updated = "Yes" if wrote else "No"
-                _audit("odoo_set_terms",
-                       f"{'appended' if wrote else 'already present:'} 'PO Cliente: {po_number}' in T&C of {q['name']}",
-                       "ok")
-
-        if write.get("attach_pdf") and pdf_bytes:
-            attach_name = _attachment_name(po_number, filename)  # save as PO-<#>.pdf
-            if dry:
-                out.pdf_attached = "Dry-run"
-                _audit("odoo_attach_pdf", f"would attach as {attach_name} ({len(pdf_bytes)} bytes) to {q['name']}", "dry-run")
-            else:
-                out.attachment_id = odoo.attach_pdf(oid, attach_name, pdf_bytes)
-                out.pdf_attached = "Yes"
-                _audit("odoo_attach_pdf", f"attached as {attach_name} (id={out.attachment_id}) to {q['name']}", "ok")
-
-        if write.get("post_chatter_note"):
-            # Plain text (no HTML): Odoo escapes a str body and converts newlines to
-            # <br>, so tags would render literally — see read-back of stored body.
-            meta = email_meta or {}
-            lines = [
-                f"Hermes: linked customer PO {po_number or '(no #)'} to this quotation "
-                f"(match confidence {match.confidence})."
-            ]
-            sender = _sender_line(meta.get("from", ""))
-            if sender:
-                lines.append(f"Received from: {sender}.")
-            if meta.get("subject"):
-                lines.append(f'Email subject: "{meta["subject"]}".')
-            if out.pdf_attached in ("Yes", "Dry-run"):
-                lines.append("PDF attached.")
-            lines.append("Not confirmed — for the salesperson to review.")
-            body = "\n".join(lines)
-            if dry:
-                out.chatter_posted = "Dry-run"
-                _audit("odoo_chatter", f"would post chatter note on {q['name']}", "dry-run")
-            else:
-                odoo.post_chatter(oid, body)
-                out.chatter_posted = "Yes"
-                _audit("odoo_chatter", f"posted chatter note on {q['name']}", "ok")
+        annotate_odoo(odoo, write, q, po_number, pdf_bytes, filename,
+                      match.confidence, email_meta, dry, out, _audit)
     else:
         _audit("needs_review", match.reason, "ok")
 
