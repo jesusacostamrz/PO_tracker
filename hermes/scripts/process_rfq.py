@@ -47,7 +47,7 @@ def main() -> int:
 
     try:
         odoo = OdooClient.from_config(cfg)
-        sheets = SheetsClient.from_config(cfg)
+        sheets = SheetsClient.from_config(cfg, key="quotes_spreadsheet_id")
     except (OdooError, SheetsError) as exc:
         print(f"FAILED (connect): {exc}")
         return 1

@@ -92,7 +92,9 @@ Three layers, deliberately separated:
 - Only a **confident (`matched`)** result populates Quote/SO #, Odoo SO ID, and
   Salesperson. A `needs_review` best-guess must leave those blank.
 - **Quotes pipeline:** Hermes creates DRAFT quotations only — never sends one to a
-  customer. Quotes-tab reprocessing is blocked only by a row with an Odoo Quote ID
+  customer. Quotes, Pricing Queue, and the pipeline's Audit tab live in a SEPARATE
+  workbook (`sheets.quotes_spreadsheet_id` / `SHEETS_QUOTES_SPREADSHEET_ID`), not in
+  the PO Tracker. Quotes-tab reprocessing is blocked only by a row with an Odoo Quote ID
   (dry-run and Needs-Review rows are upserted). Pricing Queue rows are written on live
   runs only; human-owned cells are Quotes col K and Pricing Queue cols M:P. Column
   constants in `core/quote_actions.py` and `scripts/apply_quotes.py` MUST stay in

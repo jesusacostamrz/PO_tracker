@@ -27,14 +27,16 @@ class SheetsClient:
     spreadsheet_id: str
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "SheetsClient":
+    def from_config(cls, cfg: dict, key: str = "spreadsheet_id") -> "SheetsClient":
+        """``key`` picks which sheets.<key> id to bind: the PO Tracker (default)
+        or the separate Quotes workbook (key="quotes_spreadsheet_id")."""
         sh = cfg["sheets"]
         sa_path = Path(sh["service_account_path"])
-        spreadsheet_id = sh["spreadsheet_id"]
+        spreadsheet_id = sh.get(key) or ""
         if not sa_path.exists():
             raise SheetsError(f"Missing service-account key at {sa_path}")
         if not spreadsheet_id:
-            raise SheetsError("SHEETS_SPREADSHEET_ID is not set in .secrets/.env")
+            raise SheetsError(f"sheets.{key} is not set — add its env var to .secrets/.env (see .env.example)")
         creds = Credentials.from_service_account_file(str(sa_path), scopes=SCOPES)
         service = build("sheets", "v4", credentials=creds, cache_discovery=False)
         return cls(service=service, spreadsheet_id=spreadsheet_id)

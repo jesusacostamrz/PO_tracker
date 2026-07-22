@@ -189,8 +189,6 @@ def main() -> int:
     _style_orders(sc, sc.sheet_ids()[orders_tab], len(ORDERS_HEADERS))
     _apply(sc, tabs["people"], PEOPLE_HEADERS, PEOPLE_DROPDOWNS)
     _apply(sc, tabs["audit"], AUDIT_HEADERS, AUDIT_DROPDOWNS)
-    _apply(sc, tabs["quotes"], QUOTES_HEADERS, QUOTES_DROPDOWNS)
-    _apply(sc, tabs["pricing_queue"], PQ_HEADERS, PQ_DROPDOWNS)
 
     # Dashboard: KPI list (label col A, value col B); header band on row 1.
     dash = tabs["dashboard"]
@@ -200,8 +198,21 @@ def main() -> int:
     sc.auto_resize(sid, 2)
     print(f"  [{dash}] {len(DASHBOARD_ROWS)} KPI rows")
 
-    print("\nDone. Tabs now:", ", ".join(sc.tab_names()))
+    print("\nDone. PO Tracker tabs:", ", ".join(sc.tab_names()))
     print("Orders rows tint by Match Status: green=matched · amber=needs review · red=no match.")
+
+    # --- Quotes workbook (separate spreadsheet; skipped if its id isn't configured) ---
+    try:
+        qc = SheetsClient.from_config(cfg, key="quotes_spreadsheet_id")
+    except SheetsError as exc:
+        print(f"\nQuotes workbook SKIPPED: {exc}")
+        return 0
+    print(f"\nQuotes spreadsheet {qc.spreadsheet_id}")
+    print("Existing tabs:", ", ".join(qc.tab_names()) or "(none)")
+    _apply(qc, tabs["quotes"], QUOTES_HEADERS, QUOTES_DROPDOWNS)
+    _apply(qc, tabs["pricing_queue"], PQ_HEADERS, PQ_DROPDOWNS)
+    _apply(qc, tabs["audit"], AUDIT_HEADERS, AUDIT_DROPDOWNS)  # quotes pipeline audits here
+    print("Done. Quotes workbook tabs:", ", ".join(qc.tab_names()))
     return 0
 
 

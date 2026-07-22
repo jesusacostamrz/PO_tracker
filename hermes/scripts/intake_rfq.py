@@ -118,7 +118,7 @@ def main() -> int:
     try:
         gm = GmailClient.from_config(cfg)
         odoo = OdooClient.from_config(cfg)
-        sheets = SheetsClient.from_config(cfg)
+        sheets = SheetsClient.from_config(cfg, key="quotes_spreadsheet_id")
     except (GmailError, OdooError, SheetsError) as exc:
         print(f"FAILED (connect): {exc}")
         return 1

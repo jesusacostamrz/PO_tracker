@@ -22,7 +22,8 @@ odoo:
   api_key_env: ODOO_API_KEY         # value lives in .secrets/.env
 
 sheets:
-  spreadsheet_id: ${SHEETS_SPREADSHEET_ID}
+  spreadsheet_id: ${SHEETS_SPREADSHEET_ID}                # PO Tracker workbook
+  quotes_spreadsheet_id: ${SHEETS_QUOTES_SPREADSHEET_ID}  # separate Quotes workbook (Quotes + Pricing Queue + its own Audit)
   service_account_path: ./.secrets/google_service_account.json
   tabs:
     orders: Orders
