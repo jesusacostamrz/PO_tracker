@@ -31,8 +31,10 @@ print("OK research_price stubbed offer")
 assert research_price(line, StubLLM({}), None) is None
 print("OK research_price None search")
 
-assert research_price(line, StubLLM({"price": None}), StubSearch()) is None
-print("OK research_price null price")
+# null price now degrades to a reference-link-only suggestion (price None, url kept)
+ref = research_price(line, StubLLM({"price": None}), StubSearch())
+assert ref is not None and ref["price"] is None and ref["url"] == "https://example.com/p/6204"
+print("OK research_price null price -> reference link")
 
 html_og = '<html><head><meta property="og:image" content="https://example.com/img/6204.jpg"></head></html>'
 assert _og_image_url(html_og) == "https://example.com/img/6204.jpg"

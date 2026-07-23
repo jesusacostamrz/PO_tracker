@@ -130,13 +130,17 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                    f"would create draft quote for {partner['name']}: {len(auto_lines)} auto line(s), "
                    f"{len(queue)} queued", "dry-run")
         else:
-            # Every RFQ line lands on the draft now. A queued line with no suggested
-            # product gets one auto-created at price 0 (dedup by part#, else description
-            # within this batch) so nothing is silently dropped from the quote.
+            # Every RFQ line lands on the draft now. Only a TRUSTED match (exact
+            # part-number, or unambiguous fuzzy >= threshold) may reuse an existing
+            # product — the matcher also attaches weak below-threshold/ambiguous
+            # guesses to m.product as FYI for the Pricing Queue, and quoting those
+            # put an ALTECH locknut on an MHL-4 valve line. Untrusted lines get a
+            # product auto-created at price 0 (dedup by part#, else description).
             created_products: list[tuple[int, str, str, str, str]] = []  # (id, name, part, desc, mfr)
             created_by_key: dict[str, tuple[int, str]] = {}
             for m in queue:
-                if m.product is not None:
+                trusted = m.reason.startswith(("exact part-number match", "fuzzy match"))
+                if m.product is not None and trusted:
                     continue
                 part = m.line.get("part_number") or ""
                 key = norm_code(part) if part else f"desc:{(m.line.get('description') or '').strip().lower()}"
@@ -151,8 +155,16 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                     _audit("odoo_create_product", f"created product {pid} '{name[:40]}' (part {part or '-'})", "ok")
                 m.product = {"id": pid, "name": name}
 
+            def _line_name(m):
+                # customer's own wording on the line so the salesperson (and the
+                # customer PDF) see what was asked for, not just our catalog name
+                part = m.line.get("part_number") or ""
+                desc = m.line.get("description") or ""
+                return f"[{part}] {desc}".strip() if part and desc else (desc or part or None)
+
             queue_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
-                           "price_unit": 0.0} for m in queue]
+                           "price_unit": 0.0,
+                           **({"name": n} if (n := _line_name(m)) else {})} for m in queue]
             lines = auto_lines + queue_lines
             out.order_id = odoo.create_draft_quote(partner["id"], lines, client_ref=rfq_ref)
             out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""

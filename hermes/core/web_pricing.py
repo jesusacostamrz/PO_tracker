@@ -8,9 +8,14 @@ that exactly like "no suggestion available".
 from __future__ import annotations
 
 _SYSTEM = """You extract the single best CURRENT purchase offer for one exact part
-from raw web-search results. Prefer Mexican vendors when available. Only exact
-part-number matches count — do not substitute an equivalent or generic part.
-If no trustworthy offer with a real price is present, return price null.
+from raw web-search results. Prefer Mexican vendors when available. STRICT rule:
+the offer's own part number must be EXACTLY the requested one (same prefix, same
+suffix, same digits) — a near-miss variant, a different series, or a lookalike
+SKU does NOT count; when in doubt return price null. The url MUST be copied
+verbatim from the provided Sources list and must be the page of that exact part.
+If no trustworthy offer with a real price exists, return price null but still
+set url to the most relevant source (a catalog or vendor page for the part) and
+say why in note.
 
 Return ONLY a JSON object:
 {"price": number|null, "currency": "MXN"|"USD"|..., "vendor": string, "url": string, "note": string}"""
@@ -44,7 +49,12 @@ def research_price(line: dict, llm, search) -> dict | None:
 
         price = offer.get("price")
         if price is None:
-            return None
+            # no trustworthy offer — still hand the human a reference link
+            url = offer.get("url") or ((result.get("sources") or [None])[0])
+            if not url:
+                return None
+            return {"price": None, "currency": "", "vendor": offer.get("vendor") or "",
+                    "url": url, "note": offer.get("note") or "no trustworthy offer found"}
         offer["price"] = float(price)
         return offer
     except Exception as e:
