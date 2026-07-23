@@ -10,6 +10,8 @@ PRODUCTS = [
     {"id": 2, "default_code": "6205-2RS", "name": "Rodamiento 6205 2RS sellado", "list_price": 52.0},
     {"id": 3, "default_code": False, "name": "Cable THW 14 AWG rojo (m)", "list_price": 8.5},
     {"id": 4, "default_code": "REL-24V", "name": "Relevador 24VDC 2 polos", "list_price": 0.0},
+    {"id": 5, "default_code": False, "name": "PIEZA", "list_price": 99.0},
+    {"id": 6, "default_code": False, "name": "Cilindro clamp MHL-4", "list_price": 120.0},
 ]
 
 assert norm_code(" 6204‑2rs ") == norm_code("6204-2RS")  # case/space/unicode-dash insensitive
@@ -36,5 +38,14 @@ assert m.status == "queue"
 # 5. nothing similar -> queue with no strong suggestion
 m = one({"part_number": "ZZZ-999", "description": "valvula solenoide 3/4", "quantity": 1})
 assert m.status == "queue"
+
+# 6. generic one-word product ("PIEZA") must NOT win by token-subset against a long
+#    description that merely contains the word (the priced-generic auto-match bug)
+m = one({"part_number": "XQZ-77", "description": "valvula manual de clamp tope de pieza", "quantity": 1})
+assert not (m.status == "matched" and m.product and m.product["id"] == 5), m
+
+# 7. ...but the RFQ part number appearing inside a product's name IS trusted
+m = one({"part_number": "MHL-4", "description": "valvula manual de clamp", "quantity": 1})
+assert m.status == "matched" and m.product["id"] == 6, m
 
 print("OK test_product_match")

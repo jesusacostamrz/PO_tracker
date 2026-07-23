@@ -30,12 +30,22 @@ class LineMatch:
 
 
 def _best_two(line: dict, products: list[dict]) -> list[tuple[float, dict]]:
-    """Top-2 (score, product) by fuzzy similarity of code+description vs code+name."""
-    want = f"{line.get('part_number') or ''} {line.get('description') or ''}".strip()
+    """Top-2 (score, product) by fuzzy similarity of code+description vs code+name.
+
+    token_sort_ratio, NOT token_set_ratio: set-ratio scores 100 whenever the product
+    name's tokens are a subset of the RFQ text, so generic catalog names ("PIEZA",
+    "Neumatica") beat everything. The one subset we DO trust is the RFQ part number
+    appearing inside the product's code/name — that's near-exact evidence.
+    """
+    part = (line.get("part_number") or "").strip().lower()
+    want = f"{part} {line.get('description') or ''}".strip().lower()
     scored = []
     for p in products:
-        have = f"{p.get('default_code') or ''} {p.get('name') or ''}".strip()
-        scored.append((fuzz.token_set_ratio(want.lower(), have.lower()), p))
+        have = f"{p.get('default_code') or ''} {p.get('name') or ''}".strip().lower()
+        score = fuzz.token_sort_ratio(want, have)
+        if part:
+            score = max(score, fuzz.token_set_ratio(part, have))
+        scored.append((score, p))
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored[:2]
 
