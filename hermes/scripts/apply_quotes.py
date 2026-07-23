@@ -1,9 +1,13 @@
 """Pricing-queue resolver: apply human pricing decisions back to Odoo drafts.
 
-For each Pricing Queue row a human resolved (Sale Price + either an existing
-product id in "Use Product ID" or "Create Product? = Yes"):
+Intake now auto-creates a product (price 0) and adds a line for EVERY RFQ line up
+front, so the order usually already carries a 0-priced line for this product. For
+each Pricing Queue row a human resolved (Sale Price + a product id — "Use Product
+ID" if set, else create if "Create Product? = Yes", else the intake-suggested
+product id in col J):
   1. create the product if asked (name = Description, code = Part #, price = Sale Price)
-  2. add the line to the RFQ's draft quotation (explicit price_unit = human's price)
+  2. price the existing 0-priced order line if one exists (write price_unit + qty),
+     else add a new line (explicit price_unit = human's price)
   3. mark the row Resolved; refresh the Quotes row (Queued count, Status -> Complete at 0)
 
 Idempotency: only rows with Status == "Pending" are touched; Resolved rows never re-apply.
@@ -60,7 +64,7 @@ def run_once(odoo, sheets, cfg, dry) -> int:
     tabs = cfg["sheets"]["tabs"]
     pq_tab, quotes_tab, audit_tab = tabs["pricing_queue"], tabs["quotes"], tabs["audit"]
     run_mode = "dry-run" if dry else "live"
-    rows = sheets.read(f"{pq_tab}!A2:P")
+    rows = sheets.read(f"{pq_tab}!A2:S")
 
     applied, touched_orders = 0, set()
     for i, r in enumerate(rows):
@@ -71,7 +75,10 @@ def run_once(odoo, sheets, cfg, dry) -> int:
         use_id = _cell(r, PQ_USE_ID)
         # An explicit product id wins over a stray Create?=Yes — never duplicate a product.
         create = _cell(r, PQ_CREATE).lower() == "yes" and not use_id
-        if price is None or not (use_id or create):
+        # Intake now auto-creates a product for every unmatched line — fall back to its
+        # suggested id so the human only has to type Sale Price.
+        suggested_id = _cell(r, PQ_SUGG_ID)
+        if price is None or not (use_id or create or suggested_id):
             continue  # human hasn't finished this row
 
         order_id = _num(_cell(r, PQ_ORDER_ID))
@@ -89,8 +96,9 @@ def run_once(odoo, sheets, cfg, dry) -> int:
             continue
 
         if dry:
-            what = f"create product '{desc[:40]}'" if create else f"use product {use_id}"
-            print(f"  row {rownum}: [SIM] {what}, add to order {int(order_id)} @ {price} x {qty:g}")
+            what = (f"create product '{desc[:40]}'" if create
+                   else f"use product {use_id}" if use_id else f"use suggested product {suggested_id}")
+            print(f"  row {rownum}: [SIM] {what}, price order {int(order_id)} @ {price} x {qty:g}")
             _audit("apply_quote_line", f"would {what} on order {int(order_id)} @ {price}", "dry-run")
             applied += 1
             continue
@@ -99,13 +107,23 @@ def run_once(odoo, sheets, cfg, dry) -> int:
             if create:
                 product_id = odoo.create_product(desc or part, default_code=part, list_price=price)
                 _audit("odoo_create_product", f"created product {product_id} '{desc[:40]}'", "ok")
-            else:
+            elif use_id:
                 product_id = int(float(use_id))
-            odoo.add_quote_lines(int(order_id), [{
-                "product_id": product_id, "product_uom_qty": qty, "price_unit": price,
-            }])
+            else:
+                product_id = int(float(suggested_id))
+            # Intake usually already added a 0-priced line for this product — price it
+            # in place instead of adding a duplicate.
+            existing_line = odoo.find_quote_line(int(order_id), product_id)
+            if existing_line:
+                odoo.update_quote_line(existing_line["id"], {"price_unit": price, "product_uom_qty": qty})
+                _audit("apply_quote_line",
+                      f"priced existing line for product {product_id} on order {int(order_id)} @ {price}", "ok")
+            else:
+                odoo.add_quote_lines(int(order_id), [{
+                    "product_id": product_id, "product_uom_qty": qty, "price_unit": price,
+                }])
+                _audit("apply_quote_line", f"added product {product_id} to order {int(order_id)} @ {price}", "ok")
             sheets.update_range(f"{pq_tab}!L{rownum}", [["Resolved"]])
-            _audit("apply_quote_line", f"added product {product_id} to order {int(order_id)} @ {price}", "ok")
             touched_orders.add(int(order_id))
             applied += 1
             print(f"  row {rownum}: product {product_id} -> order {int(order_id)} @ {price} x {qty:g}")
@@ -116,7 +134,7 @@ def run_once(odoo, sheets, cfg, dry) -> int:
             print(f"  row {rownum}: ERROR {exc}")
 
     if not dry and touched_orders:
-        fresh = sheets.read(f"{pq_tab}!A2:P")
+        fresh = sheets.read(f"{pq_tab}!A2:S")
         for oid in touched_orders:
             _refresh_quotes_row(sheets, quotes_tab, fresh, oid)
     return applied

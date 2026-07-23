@@ -2,10 +2,15 @@
 
 Mirrors core/actions.py doctrine: honors runtime.dry_run; idempotency keyed on the
 Gmail message id in the Quotes tab (a row that created an Odoo order blocks;
-dry-run and needs-review rows are upserted);
-human-owned cells (Quotes col K) are never overwritten. Pricing Queue rows are only
-written on LIVE runs — a dry-run logs intent to Audit instead. NEVER confirms or
-sends anything.
+dry-run and needs-review rows are upserted); human-owned cells (Quotes col K) are
+never overwritten. On a LIVE run with a known partner, EVERY RFQ line lands on the
+draft quotation immediately: auto-matched lines are priced from the pricelist,
+queued lines land at price_unit 0 (a queued line with no suggested product gets
+one auto-created at price 0, image attached best-effort) so nothing is left off
+the quote. Pricing Queue rows are only written on LIVE runs — a dry-run logs
+intent to Audit instead. Web-researched price suggestions (Pricing Queue cols
+Q-S) are advisory only — a human still sets Sale Price before it reaches the
+quote. NEVER confirms or sends anything.
 """
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ from rapidfuzz import fuzz
 from connectors.odoo_client import OdooClient
 from connectors.sheets_client import SheetsClient
 from core.actions import _now
-from core.product_matcher import LineMatch
+from core.product_matcher import LineMatch, norm_code
 
 # Quotes tab column indices (0-based). Lockstep with QUOTES_HEADERS in setup_sheet.py.
 Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 7, 8, 9
@@ -75,7 +80,8 @@ def _find_existing(sheets: SheetsClient, tab: str, msg_id: str):
 
 
 def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
-              gmail_msg_id: str = "", dry_run: bool | None = None) -> QuoteOutcome:
+              gmail_msg_id: str = "", dry_run: bool | None = None,
+              search=None, llm=None) -> QuoteOutcome:
     dry = cfg.get("runtime", {}).get("dry_run", True) if dry_run is None else dry_run
     tabs = cfg["sheets"]["tabs"]
     quotes_tab, pq_tab, audit_tab = tabs["quotes"], tabs["pricing_queue"], tabs["audit"]
@@ -117,29 +123,102 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         _audit("needs_review", f"no Odoo partner for '{customer}' "
                                f"({len(auto)} auto, {len(queue)} unpriced line(s) on hold)", "ok")
     else:
-        lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"]}
-                 for m in auto]  # no price_unit: Odoo prices from the pricelist
+        auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"]}
+                     for m in auto]  # no price_unit: Odoo prices from the pricelist
         if dry:
             _audit("odoo_create_quote",
-                   f"would create draft quote for {partner['name']}: {len(lines)} auto line(s), "
+                   f"would create draft quote for {partner['name']}: {len(auto_lines)} auto line(s), "
                    f"{len(queue)} queued", "dry-run")
         else:
+            # Every RFQ line lands on the draft now. A queued line with no suggested
+            # product gets one auto-created at price 0 (dedup by part#, else description
+            # within this batch) so nothing is silently dropped from the quote.
+            created_products: list[tuple[int, str, str, str, str]] = []  # (id, name, part, desc, mfr)
+            created_by_key: dict[str, tuple[int, str]] = {}
+            for m in queue:
+                if m.product is not None:
+                    continue
+                part = m.line.get("part_number") or ""
+                key = norm_code(part) if part else f"desc:{(m.line.get('description') or '').strip().lower()}"
+                if key in created_by_key:
+                    pid, name = created_by_key[key]
+                else:
+                    name = m.line.get("description") or part or "Unknown item"
+                    pid = odoo.create_product(name, default_code=part, list_price=0.0)
+                    created_by_key[key] = (pid, name)
+                    created_products.append((pid, name, part, m.line.get("description") or "",
+                                             m.line.get("manufacturer") or ""))
+                    _audit("odoo_create_product", f"created product {pid} '{name[:40]}' (part {part or '-'})", "ok")
+                m.product = {"id": pid, "name": name}
+
+            queue_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
+                           "price_unit": 0.0} for m in queue]
+            lines = auto_lines + queue_lines
             out.order_id = odoo.create_draft_quote(partner["id"], lines, client_ref=rfq_ref)
             out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""
             out.status = "Pending Pricing" if queue else "Draft Created"
             _audit("odoo_create_quote",
                    f"created draft {out.order_name} for {partner['name']} "
-                   f"({len(lines)} auto, {len(queue)} queued)", "ok")
+                   f"({len(auto_lines)} auto, {len(queue_lines)} at price 0, "
+                   f"{len(created_products)} product(s) auto-created)", "ok")
+
+            # Product images (best-effort; a failure here must never fail the RFQ):
+            # every product on the quote that has no image yet — auto-created ones
+            # always, existing catalog products only when image_128 is empty.
+            if search is not None:
+                try:
+                    from core.product_images import find_image_bytes
+                except ImportError:
+                    find_image_bytes = None
+                if find_image_bytes:
+                    created_ids = {pid for pid, _ in created_by_key.values()}
+                    cand: dict[int, tuple[str, str, str]] = {}
+                    for m in auto + queue:
+                        pid = (m.product or {}).get("id")
+                        if pid and pid not in cand:
+                            cand[pid] = (m.line.get("part_number") or "",
+                                         m.line.get("description") or "",
+                                         m.line.get("manufacturer") or "")
+                    existing_ids = [p for p in cand if p not in created_ids]
+                    have_img = {rec["id"] for rec in odoo.search_read(
+                        "product.product", [["id", "in", existing_ids]], ["image_128"])
+                        if rec.get("image_128")} if existing_ids else set()
+                    for pid, (part, desc, mfr) in cand.items():
+                        if pid in have_img:
+                            continue
+                        try:
+                            img = find_image_bytes(part, mfr, desc, search)
+                            if img and odoo.set_product_image(pid, img):
+                                _audit("product_image", f"attached image to product {pid}", "ok")
+                        except Exception as exc:
+                            _audit("product_image", f"product {pid}: {type(exc).__name__}: {exc}", "error")
 
     # --- Pricing Queue rows (LIVE only; dry-run just audits intent) ---
     if queue and not dry and partner:
+        try:
+            from core.web_pricing import research_price
+        except ImportError:
+            research_price = None
         for m in queue:
+            web_price = web_currency = web_source = ""
+            if research_price and search is not None and llm is not None:
+                try:
+                    offer = research_price(m.line, llm, search)
+                except Exception as exc:  # best-effort: never block the queue row
+                    offer = None
+                    _audit("web_pricing", f"{m.line.get('part_number') or m.line.get('description')}: "
+                                          f"{type(exc).__name__}: {exc}", "error")
+                if offer:
+                    web_price = offer.get("price") or ""
+                    web_currency = offer.get("currency") or ""
+                    web_source = offer.get("url") or ""
             sheets.append_row(pq_tab, [
                 _now(), customer, rfq_ref, out.order_name, out.order_id or "",
                 m.line.get("part_number") or "", m.line.get("description") or "",
                 m.line.get("quantity") or "",
                 (m.product or {}).get("name") or "", (m.product or {}).get("id") or "",
                 m.reason, "Pending", "", "", "", "",
+                web_price, web_currency, web_source,
             ])
         _audit("sheet_upsert", f"queued {len(queue)} line(s) in Pricing Queue", "ok")
     elif queue and dry:

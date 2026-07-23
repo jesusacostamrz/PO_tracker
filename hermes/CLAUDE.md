@@ -33,7 +33,8 @@ python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt> [--live]   # local
 python scripts/intake_rfq.py [--live] [--max N] [--watch SECONDS]        # Gmail batch (subject contains "RFQ")
 python scripts/apply_quotes.py [--live]              # apply human pricing from the Pricing Queue tab
 python scripts/import_pricelist.py --brand <key> <lista.xlsx> [--live]   # distributor price list -> Odoo catalog
-# offline self-checks (no network): test_rfq_gmail, test_rfq_parse, test_product_match, test_pricelist
+# offline self-checks (no network): test_rfq_gmail, test_rfq_parse, test_product_match,
+#   test_pricelist, test_web_pricing
 ```
 
 There is no test framework, linter, or build step — `scripts/test_*.py` are hand-run
@@ -98,13 +99,21 @@ Three layers, deliberately separated:
   (dry-run and Needs-Review rows are upserted). Pricing Queue rows are written on live
   runs only; human-owned cells are Quotes col K and Pricing Queue cols M:P. Column
   constants in `core/quote_actions.py` and `scripts/apply_quotes.py` MUST stay in
-  lockstep with `QUOTES_HEADERS`/`PQ_HEADERS` in `scripts/setup_sheet.py`. Products are
-  never created without a price-list entry or explicit human approval in the queue.
+  lockstep with `QUOTES_HEADERS`/`PQ_HEADERS` in `scripts/setup_sheet.py`. Products ARE
+  now auto-created on live RFQ intake for any queued line with no suggested match (price
+  0, recorded in the Pricing Queue; product image attached best-effort) so EVERY RFQ
+  line lands on the draft quotation immediately — auto-matched lines priced from the
+  pricelist, queued lines at price 0. Web-researched price suggestions (Pricing Queue
+  cols Q-S: Web Price, Web Currency, Web Source) are advisory only — a human always
+  confirms Sale Price before it reaches the quote. Drafts are still never
+  confirmed/sent.
 
 ## Secrets & config
 
 - All secrets live in `hermes/.secrets/.env` (gitignored; `chmod 600` on the VPS),
   referenced from the YAML as `${VAR}`. Create it from `.env.example`. Google OAuth/token
   and service-account JSON also live under `.secrets/`. Nothing here is ever committed.
+  Web price research + product image lookups ride the existing OpenAI key (Responses API
+  `web_search` tool) — on iff the LLM key is set and `base_url` is OpenAI; no extra secret.
 - `config/hermes.config.yaml` holds all non-secret settings (company identity, matching
   thresholds, write toggles, digest schedule). Tune behavior here, not in code.

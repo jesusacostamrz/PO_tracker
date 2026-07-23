@@ -43,6 +43,7 @@ Return ONLY a JSON object (null where absent):
   "line_items": [
     {{"part_number": string,  // manufacturer part number / catalog code; null if only a description
       "description": string,  // what the item is, as written
+      "manufacturer": string, // brand/maker column if included (e.g. NITRA, SMC, BIMBA); else null
       "quantity": number}}    // requested quantity; default 1 if truly absent
   ]
 }}
@@ -97,6 +98,7 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
     for li in result["line_items"]:
         li["part_number"] = (li.get("part_number") or None)
         li["description"] = str(li.get("description") or "")
+        li["manufacturer"] = str(li.get("manufacturer") or "")
         try:
             li["quantity"] = float(li.get("quantity") or 1)
         except (TypeError, ValueError):

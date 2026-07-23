@@ -179,6 +179,21 @@ class OdooClient:
             vals["default_code"] = default_code
         return self.execute("product.product", "create", vals)
 
+    def set_product_image(self, product_id: int, img_bytes: bytes) -> bool:
+        return self.execute("product.product", "write", [product_id],
+                            {"image_1920": base64.b64encode(img_bytes).decode("ascii")})
+
+    def find_quote_line(self, order_id: int, product_id: int) -> dict | None:
+        recs = self.search_read(
+            "sale.order.line",
+            [["order_id", "=", order_id], ["product_id", "=", product_id]],
+            ["product_uom_qty", "price_unit"], limit=1,
+        )
+        return recs[0] if recs else None
+
+    def update_quote_line(self, line_id: int, vals: dict) -> bool:
+        return self.execute("sale.order.line", "write", [line_id], vals)
+
     def product_tmpl_id(self, product_id: int) -> int:
         rec = self.execute("product.product", "read", [product_id], ["product_tmpl_id"])
         v = rec[0]["product_tmpl_id"]

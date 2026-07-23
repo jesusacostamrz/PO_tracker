@@ -49,7 +49,8 @@ def _sources_from_message(gm: GmailClient, full: dict) -> list[tuple[str, str, b
     return sources
 
 
-def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_read, lines_out):
+def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_read, lines_out,
+                     search=None):
     labels = cfg["rfq"]["labels"]
     full = gm.get_message(msg_id)
     subj = (gm.headers(full).get("subject") or "(no subject)")[:50]
@@ -69,7 +70,8 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
         return
 
     matches = match_lines(rfq["line_items"], products, cfg["rfq"]["match"])
-    out = apply_rfq(odoo, sheets, cfg, rfq, matches, gmail_msg_id=msg_id, dry_run=dry)
+    out = apply_rfq(odoo, sheets, cfg, rfq, matches, gmail_msg_id=msg_id, dry_run=dry,
+                    search=search, llm=llm)
 
     # skipped = already tracked by a prior live run -> it was handled; label Processed.
     clean = out.skipped or (out.queued == 0 and out.status in ("Draft Created", "Dry-run"))
@@ -82,7 +84,7 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
                      + (" (skipped: already tracked)" if out.skipped else ""))
 
 
-def run_once(gm, odoo, sheets, cfg, llm, dry, max_msgs, mark_read) -> list[str]:
+def run_once(gm, odoo, sheets, cfg, llm, dry, max_msgs, mark_read, search=None) -> list[str]:
     lines_out: list[str] = []
     msgs = gm.search(cfg["rfq"]["poll_query"], max_results=max_msgs)
     if not msgs:
@@ -90,7 +92,8 @@ def run_once(gm, odoo, sheets, cfg, llm, dry, max_msgs, mark_read) -> list[str]:
     products = odoo.all_products()  # fetch the pool once per batch
     for m in msgs:
         try:
-            _process_message(gm, odoo, sheets, cfg, llm, products, m["id"], dry, mark_read, lines_out)
+            _process_message(gm, odoo, sheets, cfg, llm, products, m["id"], dry, mark_read, lines_out,
+                             search=search)
         except Exception as exc:  # one bad message must not kill the batch
             if not dry:
                 try:
@@ -123,12 +126,18 @@ def main() -> int:
         print(f"FAILED (connect): {exc}")
         return 1
     llm = LLMClient.from_config(cfg)
+    try:  # web search is optional (off if no API key) — never a hard dependency
+        from connectors.search_client import SearchClient
+        search = SearchClient.from_config(cfg)
+    except ImportError:
+        search = None
     print(f"RFQ intake  Gmail: {gm.account}  Odoo db: {cfg['odoo']['db']}  "
-          f"mode: {'DRY-RUN' if dry else 'LIVE'}")
+          f"mode: {'DRY-RUN' if dry else 'LIVE'}  web-pricing: {'on' if search else 'off'}")
 
     while True:
         try:
-            for line in run_once(gm, odoo, sheets, cfg, llm, dry, args.max, args.mark_read) or ["  (no RFQ messages)"]:
+            for line in run_once(gm, odoo, sheets, cfg, llm, dry, args.max, args.mark_read,
+                                 search=search) or ["  (no RFQ messages)"]:
                 print(line)
         except Exception as exc:
             print(f"[poll] failed: {type(exc).__name__}: {exc}")

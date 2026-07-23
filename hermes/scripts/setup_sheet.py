@@ -80,12 +80,15 @@ QUOTES_DROPDOWNS = {
 }
 
 # Pricing Queue: one row per unresolved RFQ line. Human-owned cols M-P (idx 12-15).
+# Cols Q-S (idx 16-18) are Hermes-owned: web-researched price SUGGESTIONS only, never
+# authoritative — a human still sets Sale Price (M) before anything reaches the quote.
 PQ_HEADERS = [
     "Added At", "Customer", "RFQ Ref", "Quote #", "Odoo Quote ID",   # 0-4  A-E
     "Part #", "Description", "Qty",                                  # 5-7  F-H
     "Suggested Product", "Suggested Product ID", "Match Note",       # 8-10 I-K
     "Status",                                                        # 11   L
     "Sale Price", "Use Product ID", "Create Product?", "Human Notes",# 12-15 M-P (human-owned)
+    "Web Price", "Web Currency", "Web Source",                       # 16-18 Q-S (Hermes-owned)
 ]
 PQ_DROPDOWNS = {
     11: ["Pending", "Resolved", "Error"],   # Status (Hermes-owned)
