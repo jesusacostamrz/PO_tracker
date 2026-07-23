@@ -43,6 +43,10 @@ rfq:
     fuzzy_threshold: 88       # >= this token_set_ratio -> candidate match
     ambiguity_margin: 3       # top-2 scores closer than this -> queue, never guess
     partner_threshold: 85     # customer-name fuzzy floor to pick the Odoo partner
+  # Extracted customer name (lowercased) -> exact Odoo partner name, for customers whose
+  # email-domain name differs from their Odoo legal name.
+  customer_aliases:
+    abc aluminum: Aluminio de Baja California
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.

@@ -49,6 +49,9 @@ Return ONLY a JSON object (null where absent):
 
 Rules:
 - Extract EVERY requested item; never invent items; never drop rows.
+- RFQs usually arrive FORWARDED by our own salespeople — ignore the forwarder. The customer is the
+  ORIGINAL sender in the quoted forwarded header (its "From:"/"De:" line); take their company name,
+  or infer it from their email domain (e.g. jperez@acme-corp.com -> Acme Corp).
 - part_number is a catalog/manufacturer code (e.g. "6204-2RS", "1SVR405613R3100") — not a line number.
 - Numbers: dot decimal, no thousands separators; quantity must be a number.
 - Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer typed.

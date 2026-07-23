@@ -37,10 +37,17 @@ class QuoteOutcome:
         self.notes.append(msg)
 
 
-def _find_partner(odoo: OdooClient, name: str, threshold: int) -> dict | None:
+def _find_partner(odoo: OdooClient, name: str, threshold: int,
+                  aliases: dict | None = None) -> dict | None:
     if not name:
         return None
+    # e.g. "ABC Aluminum" (email domain) -> "Aluminio de Baja California" (Odoo name)
+    name = (aliases or {}).get(name.strip().lower(), name)
     cands = odoo.find_partners(name, limit=10)
+    if not cands:  # ponytail: retry with the longest word — full extracted name often isn't a substring
+        words = sorted((w for w in name.split() if len(w) >= 4), key=len, reverse=True)
+        if words:
+            cands = odoo.find_partners(words[0], limit=10)
     best, best_score = None, 0
     for c in cands:
         s = max(fuzz.token_set_ratio(name.lower(), (c.get(k) or "").lower())
@@ -102,7 +109,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             return _flush(out)
 
     # --- customer partner ---
-    partner = _find_partner(odoo, customer, cfg["rfq"]["match"].get("partner_threshold", 85))
+    partner = _find_partner(odoo, customer, cfg["rfq"]["match"].get("partner_threshold", 85),
+                            aliases=cfg["rfq"].get("customer_aliases") or {})
     if not partner:
         out.status = "Needs Review"
         out.log(f"Customer '{customer or '?'}' not found in Odoo — no draft created.")

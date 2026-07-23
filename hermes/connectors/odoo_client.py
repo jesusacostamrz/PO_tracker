@@ -79,7 +79,9 @@ class OdooClient:
         return self.search_read("sale.order", domain, fields, limit=limit, order="date_order desc")
 
     def find_partners(self, name, limit=10) -> list[dict]:
-        domain = ["|", ["name", "ilike", name], ["display_name", "ilike", name]]
+        # ponytail: "|"-prefixed OR domains are silently ignored by this instance over
+        # XML-RPC (returns unfiltered) — name ilike alone; display_name contains name anyway.
+        domain = [["name", "ilike", name]]
         return self.search_read("res.partner", domain, ["name", "display_name", "email"], limit=limit)
 
     def order_lines(self, order_id) -> list[dict]:
