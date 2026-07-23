@@ -48,6 +48,10 @@ html_content_first = '<html><head><meta content="https://example.com/img/first.j
 assert _og_image_url(html_content_first) == "https://example.com/img/first.jpg"
 print("OK _og_image_url content-attribute-first")
 
+html_ldjson = '<html><script type="application/ld+json">{"@type":"Product","image": ["https://example.com/img/ld.jpg"]}</script></html>'
+assert _og_image_url(html_ldjson) == "https://example.com/img/ld.jpg"
+print("OK _og_image_url json-ld fallback")
+
 assert find_image_bytes("6204-2RS", "", "Rodamiento sellado", None) is None
 print("OK find_image_bytes None search")
 

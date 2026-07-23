@@ -23,11 +23,18 @@ _META_RE = re.compile(
 )
 
 
+# fallbacks for pages without og:image: JSON-LD product schema, then <link rel=image_src>
+_LDJSON_IMG_RE = re.compile(r'"image"\s*:\s*\[?\s*"(https?://[^"]+)"', re.IGNORECASE)
+_LINK_IMG_RE = re.compile(
+    r'<link\s+[^>]*?rel=["\']image_src["\'][^>]*?href=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
 def _og_image_url(html: str) -> str | None:
     m = _META_RE.search(html)
-    if not m:
-        return None
-    return m.group(1) or m.group(2)
+    if m:
+        return m.group(1) or m.group(2)
+    m = _LDJSON_IMG_RE.search(html) or _LINK_IMG_RE.search(html)
+    return m.group(1) if m else None
 
 
 def find_image_bytes(part_number: str, manufacturer: str, description: str, search) -> bytes | None:
