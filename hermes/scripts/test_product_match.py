@@ -12,6 +12,7 @@ PRODUCTS = [
     {"id": 4, "default_code": "REL-24V", "name": "Relevador 24VDC 2 polos", "list_price": 0.0},
     {"id": 5, "default_code": False, "name": "PIEZA", "list_price": 99.0},
     {"id": 6, "default_code": False, "name": "Cilindro clamp MHL-4", "list_price": 120.0},
+    {"id": 7, "default_code": False, "name": "N14BLU100", "list_price": 33.0},
 ]
 
 assert norm_code(" 6204‑2rs ") == norm_code("6204-2RS")  # case/space/unicode-dash insensitive
@@ -47,5 +48,10 @@ assert not (m.status == "matched" and m.product and m.product["id"] == 5), m
 # 7. ...but the RFQ part number appearing inside a product's name IS trusted
 m = one({"part_number": "MHL-4", "description": "valvula manual de clamp", "quantity": 1})
 assert m.status == "matched" and m.product["id"] == 6, m
+
+# 8. part number stored as the product NAME (catalog convention: no default_code)
+#    still exact-matches, dash/case insensitive
+m = one({"part_number": "N14-blu-100", "description": "manguera azul 1/4", "quantity": 2})
+assert m.status == "matched" and m.product["id"] == 7 and "exact" in m.reason, m
 
 print("OK test_product_match")

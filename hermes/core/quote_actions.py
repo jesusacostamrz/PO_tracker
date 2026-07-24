@@ -147,8 +147,13 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                 if key in created_by_key:
                     pid, name = created_by_key[key]
                 else:
-                    name = m.line.get("description") or part or "Unknown item"
-                    pid = odoo.create_product(name, default_code=part, list_price=0.0)
+                    # Client catalog convention: product name = the part number alone
+                    # (no default_code — Odoo would display "[code] name" and mix the
+                    # Product/Description columns). Description goes to description_sale.
+                    desc = m.line.get("description") or ""
+                    name = part or desc or "Unknown item"
+                    pid = odoo.create_product(name, list_price=0.0,
+                                              description=desc if part else "")
                     created_by_key[key] = (pid, name)
                     created_products.append((pid, name, part, m.line.get("description") or "",
                                              m.line.get("manufacturer") or ""))

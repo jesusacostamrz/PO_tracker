@@ -105,8 +105,9 @@ def run_once(odoo, sheets, cfg, dry) -> int:
 
         try:
             if create:
-                product_id = odoo.create_product(desc or part, default_code=part, list_price=price)
-                _audit("odoo_create_product", f"created product {product_id} '{desc[:40]}'", "ok")
+                product_id = odoo.create_product(part or desc, list_price=price,
+                                                 description=desc if part else "")
+                _audit("odoo_create_product", f"created product {product_id} '{(part or desc)[:40]}'", "ok")
             elif use_id:
                 product_id = int(float(use_id))
             else:

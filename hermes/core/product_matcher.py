@@ -60,7 +60,10 @@ def _decide(product: dict, score: float, how: str) -> "LineMatch | None":
 def match_lines(lines: list[dict], products: list[dict], mcfg: dict) -> list[LineMatch]:
     threshold = mcfg.get("fuzzy_threshold", 88)
     margin = mcfg.get("ambiguity_margin", 3)
-    by_code = {norm_code(p.get("default_code")): p for p in products if p.get("default_code")}
+    # The catalog stores part numbers as the product NAME (no default_code) — index
+    # both; a real default_code wins over a name collision.
+    by_code = {norm_code(p.get("name")): p for p in products if p.get("name")}
+    by_code.update({norm_code(p.get("default_code")): p for p in products if p.get("default_code")})
 
     out: list[LineMatch] = []
     for line in lines:

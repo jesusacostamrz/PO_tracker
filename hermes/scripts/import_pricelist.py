@@ -64,8 +64,10 @@ def read_pricelist(xlsx_bytes: bytes, brand: dict) -> list[dict]:
 
 def upsert(odoo: OdooClient, sheets, audit_tab, vendor_id, rows, dry) -> tuple[int, int]:
     run_mode = "dry-run" if dry else "live"
-    existing = odoo.search_read("product.product", [], ["default_code"], limit=100000)
-    by_code = {norm_code(p.get("default_code")): p["id"] for p in existing if p.get("default_code")}
+    existing = odoo.search_read("product.product", [], ["default_code", "name"], limit=100000)
+    # part numbers live in the product NAME (catalog convention); default_code wins
+    by_code = {norm_code(p.get("name")): p["id"] for p in existing if p.get("name")}
+    by_code.update({norm_code(p.get("default_code")): p["id"] for p in existing if p.get("default_code")})
 
     created = updated = 0
     for row in rows:
@@ -81,8 +83,8 @@ def upsert(odoo: OdooClient, sheets, audit_tab, vendor_id, rows, dry) -> tuple[i
             by_code.setdefault(key, -1)  # repeated SKU in the file counts as update, like live
         else:
             if pid is None:
-                pid = odoo.create_product(row["description"] or row["part"],
-                                          default_code=row["part"], list_price=row["sale_price"])
+                pid = odoo.create_product(row["part"], list_price=row["sale_price"],
+                                          description=row["description"])
                 by_code[key] = pid  # repeated SKU later in the file updates, not re-creates
             else:
                 odoo.execute("product.product", "write", [pid], {"list_price": row["sale_price"]})

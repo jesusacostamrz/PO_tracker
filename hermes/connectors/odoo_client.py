@@ -173,10 +173,13 @@ class OdooClient:
         return self.execute("sale.order", "write", [order_id],
                             {"order_line": [(0, 0, l) for l in lines]})
 
-    def create_product(self, name: str, default_code: str = "", list_price: float = 0.0) -> int:
+    def create_product(self, name: str, default_code: str = "", list_price: float = 0.0,
+                       description: str = "") -> int:
         vals = {"name": name, "sale_ok": True, "list_price": list_price}
         if default_code:
             vals["default_code"] = default_code
+        if description:
+            vals["description_sale"] = description
         return self.execute("product.product", "create", vals)
 
     def set_product_image(self, product_id: int, img_bytes: bytes) -> bool:

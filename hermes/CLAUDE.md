@@ -67,9 +67,12 @@ Three layers, deliberately separated:
   - `actions.py` — turns a `(PO, MatchResult)` into Odoo writes + Tracker rows.
   - `rfq_parser.py` / `product_matcher.py` / `quote_actions.py` — the quotes pipeline:
     RFQ (xlsx/csv/image/email body) → line items → Odoo product matches (exact
-    `default_code`, then fuzzy; ambiguity or no sale price → Pricing Queue) → draft
-    quotation + Quotes/Pricing Queue tabs. `import_pricelist.py` upserts distributor
-    Excel lists into the catalog (dedup on part# stored as internal reference; cost →
+    `default_code` or product name, then fuzzy; ambiguity or no sale price → Pricing
+    Queue) → draft quotation + Quotes/Pricing Queue tabs. **Catalog convention: the
+    part number IS the product name** (no `default_code` — Odoo would display
+    "[code] name" and mix the quote's Product/Description columns); descriptions go
+    to `description_sale`. `import_pricelist.py` upserts distributor Excel lists into
+    the catalog (dedup on part# in name or internal reference; cost →
     `product.supplierinfo`; sale price = cost × brand markup from `pricebook:` config).
 - `scripts/` — thin CLI entrypoints (`process_po.py` single PDF, `intake.py` Gmail batch).
 
