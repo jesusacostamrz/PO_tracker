@@ -171,4 +171,20 @@ assert pi.find_image_bytes("6204-2RS", "", "", None, page_url="https://good.exam
 assert pi.find_image_bytes("6204-2RS", "", "", None, page_url="https://dead.example/x") is None
 print("OK find_image_bytes page_url first, no search needed")
 
+# short part number + known brand: hit must mention the brand too
+class StubSerperShortPart:
+    kind = "serper"
+    def web_search(self, prompt, country="MX", must_contain=None):
+        return None
+    def image_urls(self, query, country="MX", limit=8):
+        return [{"url": "https://bad.example/cam.jpg", "title": "MHL-4 camera adapter",
+                 "link": "https://bad.example/mhl-4-adapter"},
+                {"url": "https://good.example/mhl4.jpg", "title": "Fabco MHL-4 valve",
+                 "link": "https://good.example/fabco-mhl-4"}]
+
+pi._download_image = lambda url: b"GOOD" if "good.example" in url else b"BAD"
+assert pi.find_image_bytes("MHL-4", "FABCO", "valvula", StubSerperShortPart()) == b"GOOD"
+assert pi.find_image_bytes("MHL-4", "", "valvula", StubSerperShortPart()) == b"BAD"  # no brand known -> old behavior
+print("OK find_image_bytes short part requires brand in hit")
+
 print("ALL OK")

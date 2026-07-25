@@ -71,12 +71,18 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         queries = [part or subject]
         if part and mfr:
             queries.append(f"{part} {mfr}")
+        # short part numbers (e.g. "MHL-4" -> "mhl4") match far too much of the
+        # web — when the key is short and the brand is known, the hit must
+        # mention the brand as well
+        mfr_key = re.sub(r"[^a-z0-9]", "", mfr.lower())
         for key in keys:
             for q in queries:
                 for country in ("MX", "US"):
                     for img in search.image_urls(q, country=country):
                         hay = re.sub(r"[^a-z0-9]", "", f"{img['title']} {img['link']}".lower())
                         if key and key not in hay:
+                            continue
+                        if key and len(key) < 6 and mfr_key and mfr_key not in hay:
                             continue
                         data = _download_image(img["url"])
                         if data:
