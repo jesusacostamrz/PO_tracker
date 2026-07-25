@@ -187,4 +187,28 @@ assert pi.find_image_bytes("MHL-4", "FABCO", "valvula", StubSerperShortPart()) =
 assert pi.find_image_bytes("MHL-4", "", "valvula", StubSerperShortPart()) == b"BAD"  # no brand known -> old behavior
 print("OK find_image_bytes short part requires brand in hit")
 
+# set_unspsc: only 8-digit codes that exist in Odoo's catalog get written
+from core.quote_actions import set_unspsc
+
+class StubOdooU:
+    def __init__(self):
+        self.written = []
+    def unspsc_id(self, code):
+        return 777 if code == "40141603" else None
+    def execute(self, model, method, ids, vals):
+        self.written.append((ids, vals))
+
+audits = []
+so = StubOdooU()
+set_unspsc(so, StubLLM({"codes": [
+    {"id": 6499, "code": "40141603"},       # valid, in catalog -> written
+    {"id": 6500, "code": "99999999"},       # not in catalog -> skipped
+    {"id": 6501, "code": "4014"},           # not 8 digits -> ignored
+]}), [(6499, "ASD-44-24D", "ASD-44-24D", "valvula", "FABCO"),
+      (6500, "X", "X", "", ""), (6501, "Y", "Y", "", "")],
+    lambda a, d, s: audits.append((a, s)))
+assert so.written == [([6499], {"unspsc_code_id": 777})], so.written
+assert ("unspsc", "skipped") in audits
+print("OK set_unspsc writes only catalog-valid codes")
+
 print("ALL OK")

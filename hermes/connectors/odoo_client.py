@@ -174,7 +174,7 @@ class OdooClient:
                             {"order_line": [(0, 0, l) for l in lines]})
 
     def create_product(self, name: str, default_code: str = "", list_price: float = 0.0,
-                       description: str = "") -> int:
+                       description: str = "", extra: dict | None = None) -> int:
         # detailed_type "product" = Almacenable (storable, inventory-tracked) —
         # Odoo's default "consu" (Consumible) skips inventory entirely
         vals = {"name": name, "sale_ok": True, "list_price": list_price,
@@ -183,7 +183,16 @@ class OdooClient:
             vals["default_code"] = default_code
         if description:
             vals["description_sale"] = description
+        vals.update(extra or {})
         return self.execute("product.product", "create", vals)
+
+    def account_id(self, code: str) -> int | None:
+        recs = self.search_read("account.account", [["code", "=", code]], ["id"], limit=1)
+        return recs[0]["id"] if recs else None
+
+    def unspsc_id(self, code: str) -> int | None:
+        recs = self.search_read("product.unspsc.code", [["code", "=", code]], ["id"], limit=1)
+        return recs[0]["id"] if recs else None
 
     def set_product_image(self, product_id: int, img_bytes: bytes) -> bool:
         return self.execute("product.product", "write", [product_id],

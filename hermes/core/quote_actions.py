@@ -14,6 +14,7 @@ quote. NEVER confirms or sends anything.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
@@ -25,6 +26,55 @@ from core.product_matcher import LineMatch, norm_code
 
 # Quotes tab column indices (0-based). Lockstep with QUOTES_HEADERS in setup_sheet.py.
 Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 7, 8, 9
+
+_UNSPSC_SYSTEM = (
+    "You classify industrial products with UNSPSC codes (8-digit commodity level) for "
+    "Mexican CFDI. Given a JSON list of products, return ONLY a JSON object "
+    '{"codes": [{"id": <product id>, "code": "########"}]} with the most specific '
+    "commodity code per product. Omit any product you cannot classify confidently — "
+    "a missing code is fine, a wrong one is not."
+)
+
+
+def product_extra_vals(odoo, cfg, audit) -> dict:
+    """Accounting defaults (POR COBRAR / POR PAGAR accounts) for every product
+    Hermes creates — looked up by account code; a missing account is audited,
+    never fatal."""
+    pdef = cfg["rfq"].get("product_defaults") or {}
+    extra: dict = {}
+    for fld, key in (("property_account_income_id", "income_account"),
+                     ("property_account_expense_id", "expense_account")):
+        code = pdef.get(key)
+        if not code:
+            continue
+        try:
+            aid = odoo.account_id(str(code))
+        except Exception:
+            aid = None
+        if aid:
+            extra[fld] = aid
+        else:
+            audit("product_defaults", f"account {code} not found in Odoo — skipped", "error")
+    return extra
+
+
+def set_unspsc(odoo, llm, created: list[tuple], audit) -> None:
+    """One batched LLM call proposes UNSPSC codes for freshly created products;
+    a code is written only if it exists in this Odoo's UNSPSC catalog."""
+    items = [{"id": pid, "part": part, "description": desc, "brand": mfr}
+             for pid, _name, part, desc, mfr in created]
+    resp = llm.chat_json(system=_UNSPSC_SYSTEM,
+                         user=json.dumps(items, ensure_ascii=False), max_tokens=3000)
+    for row in (resp or {}).get("codes") or []:
+        pid, code = row.get("id"), str(row.get("code") or "").strip()
+        if not (pid and code.isdigit() and len(code) == 8):
+            continue
+        uid = odoo.unspsc_id(code)
+        if uid:
+            odoo.execute("product.product", "write", [int(pid)], {"unspsc_code_id": uid})
+            audit("unspsc", f"product {pid}: UNSPSC {code}", "ok")
+        else:
+            audit("unspsc", f"product {pid}: code {code} not in Odoo catalog", "skipped")
 
 
 @dataclass
@@ -138,6 +188,9 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             # guesses to m.product as FYI for the Pricing Queue, and quoting those
             # put an ALTECH locknut on an MHL-4 valve line. Untrusted lines get a
             # product auto-created at price 0 (dedup by part#, else description).
+            pdef = cfg["rfq"].get("product_defaults") or {}
+            extra_vals = product_extra_vals(odoo, cfg, _audit)
+
             created_products: list[tuple[int, str, str, str, str]] = []  # (id, name, part, desc, mfr)
             created_by_key: dict[str, tuple[int, str]] = {}
             for m in queue:
@@ -155,7 +208,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                     desc = m.line.get("description") or ""
                     name = part or desc or "Unknown item"
                     pid = odoo.create_product(name, list_price=0.0,
-                                              description=desc if part else "")
+                                              description=desc if part else "",
+                                              extra=extra_vals)
                     created_by_key[key] = (pid, name)
                     created_products.append((pid, name, part, m.line.get("description") or "",
                                              m.line.get("manufacturer") or ""))
@@ -180,6 +234,13 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                    f"created draft {out.order_name} for {partner['name']} "
                    f"({len(auto_lines)} auto, {len(queue_lines)} at price 0, "
                    f"{len(created_products)} product(s) auto-created)", "ok")
+
+            # UNSPSC classification for new products (best-effort, one LLM call)
+            if created_products and llm is not None and pdef.get("unspsc", True):
+                try:
+                    set_unspsc(odoo, llm, created_products, _audit)
+                except Exception as exc:
+                    _audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
 
             # Product image candidates (attached AFTER the pricing pass below, so
             # a price-research source page can double as the image source):

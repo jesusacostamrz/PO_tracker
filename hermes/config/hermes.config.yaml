@@ -47,6 +47,12 @@ rfq:
   # email-domain name differs from their Odoo legal name.
   customer_aliases:
     abc aluminum: Aluminio de Baja California
+  # Applied to every product Hermes creates (accounts looked up by code; UNSPSC
+  # proposed by the LLM and set only when the code exists in Odoo's catalog).
+  product_defaults:
+    income_account: "401.01.01"    # POR COBRAR: Ventas y/o servicios gravados a la tasa general
+    expense_account: "502.01.01"   # POR PAGAR: Compras
+    unspsc: true
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.

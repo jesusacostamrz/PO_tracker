@@ -25,12 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.config import load_config          # noqa: E402
 from core.actions import _now                # noqa: E402
+from core.quote_actions import product_extra_vals, set_unspsc   # noqa: E402
 from connectors.odoo_client import OdooClient, OdooError        # noqa: E402
 from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 
 # Pricing Queue column indices (0-based). Lockstep with PQ_HEADERS in setup_sheet.py.
 PQ_ORDER_NAME, PQ_ORDER_ID, PQ_PART, PQ_DESC, PQ_QTY = 3, 4, 5, 6, 7
 PQ_SUGG_ID, PQ_STATUS, PQ_PRICE, PQ_USE_ID, PQ_CREATE = 9, 11, 12, 13, 14
+PQ_BRAND = 19
 # Quotes tab indices. Lockstep with QUOTES_HEADERS.
 Q_QUEUED, Q_ORDER_ID, Q_STATUS = 5, 7, 8
 
@@ -60,13 +62,14 @@ def _refresh_quotes_row(sheets, quotes_tab, pq_rows, order_id) -> None:
             return
 
 
-def run_once(odoo, sheets, cfg, dry) -> int:
+def run_once(odoo, sheets, cfg, dry, llm=None) -> int:
     tabs = cfg["sheets"]["tabs"]
     pq_tab, quotes_tab, audit_tab = tabs["pricing_queue"], tabs["quotes"], tabs["audit"]
     run_mode = "dry-run" if dry else "live"
-    rows = sheets.read(f"{pq_tab}!A2:S")
+    rows = sheets.read(f"{pq_tab}!A2:T")
 
     applied, touched_orders = 0, set()
+    extra_vals = None  # accounting defaults, resolved once on first create
     for i, r in enumerate(rows):
         rownum = i + 2
         if _cell(r, PQ_STATUS) != "Pending":
@@ -105,9 +108,18 @@ def run_once(odoo, sheets, cfg, dry) -> int:
 
         try:
             if create:
+                if extra_vals is None:
+                    extra_vals = product_extra_vals(odoo, cfg, _audit)
                 product_id = odoo.create_product(part or desc, list_price=price,
-                                                 description=desc if part else "")
+                                                 description=desc if part else "",
+                                                 extra=extra_vals)
                 _audit("odoo_create_product", f"created product {product_id} '{(part or desc)[:40]}'", "ok")
+                if llm is not None and (cfg["rfq"].get("product_defaults") or {}).get("unspsc", True):
+                    try:
+                        set_unspsc(odoo, llm,
+                                   [(product_id, part or desc, part, desc, _cell(r, PQ_BRAND))], _audit)
+                    except Exception as exc:
+                        _audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
             elif use_id:
                 product_id = int(float(use_id))
             else:
@@ -159,8 +171,14 @@ def main() -> int:
         print(f"FAILED (connect): {exc}")
         return 1
 
+    try:  # UNSPSC classification is optional — resolver works without an LLM
+        from connectors.llm_client import LLMClient
+        llm = LLMClient.from_config(cfg)
+    except Exception:
+        llm = None
+
     print(f"Quote resolver  Odoo db: {cfg['odoo']['db']}   mode: {'DRY-RUN' if dry else 'LIVE'}")
-    n = run_once(odoo, sheets, cfg, dry)
+    n = run_once(odoo, sheets, cfg, dry, llm=llm)
     print(f"  -> {n} line(s) {'simulated' if dry else 'applied'}")
     return 0
 
