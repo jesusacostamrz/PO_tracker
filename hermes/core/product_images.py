@@ -37,7 +37,15 @@ def _og_image_url(html: str) -> str | None:
     return m.group(1) if m else None
 
 
-def find_image_bytes(part_number: str, manufacturer: str, description: str, search) -> bytes | None:
+def find_image_bytes(part_number: str, manufacturer: str, description: str, search,
+                     page_url: str | None = None) -> bytes | None:
+    # A page already validated for this exact part (e.g. the price-research
+    # source) is the best image source — same product guaranteed, no extra
+    # search call. Search engines below are the fallback.
+    if page_url:
+        data = _try_page(page_url)
+        if data:
+            return data
     if search is None:
         return None
     part = (part_number or "").strip()
@@ -47,9 +55,17 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         return None
 
     if getattr(search, "kind", "") == "serper":
-        # Google Images gives direct image URLs — no page scraping needed
-        for img_url in search.image_urls(subject, country="MX"):
-            data = _download_image(img_url)
+        # Google Images gives direct image URLs — no page scraping needed.
+        # Only trust a hit whose title/source page mentions the part number:
+        # brand words alone drag in unrelated products (wrong image is worse
+        # than no image). No part number -> keep first-hit behavior.
+        key = re.sub(r"[^a-z0-9]", "", part.lower())
+        # bare part number query — brand/description words attract lookalikes
+        for img in search.image_urls(part or subject, country="MX"):
+            hay = re.sub(r"[^a-z0-9]", "", f"{img['title']} {img['link']}".lower())
+            if key and key not in hay:
+                continue
+            data = _download_image(img["url"])
             if data:
                 return data
         return None

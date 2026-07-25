@@ -61,23 +61,52 @@ class StubSerper:
     kind = "serper"
     def __init__(self):
         self.queries = []
-    def web_search(self, prompt, country="MX"):
+        self.must_contain = []
+    def web_search(self, prompt, country="MX", must_contain=None):
         self.queries.append(prompt)
+        self.must_contain.append(must_contain)
         return {"text": "- Rodamiento 6204-2RS | $85 MXN | https://example.com/p/6204",
                 "sources": ["https://example.com/p/6204"]}
-    def image_urls(self, query, country="MX", limit=5):
+    def image_urls(self, query, country="MX", limit=8):
         self.queries.append(query)
-        return []  # empty -> find_image_bytes degrades to None, no scraping attempted
+        # first hit is an unrelated lookalike (brand-word match) -> must be skipped;
+        # second mentions the part but downloads will fail offline -> None overall
+        return [{"url": "https://bad.example/x.jpg", "title": "NITRA fertilizante 50kg",
+                 "link": "https://bad.example/fertilizante"},
+                {"url": "https://good.example/6204.jpg", "title": "Rodamiento 6204-2RS",
+                 "link": "https://good.example/p/6204-2rs"}]
 
 serper = StubSerper()
 offer = research_price(line, StubLLM({"price": 85.0, "currency": "MXN", "vendor": "X",
                                        "url": "https://example.com/p/6204", "note": ""}), serper)
 assert offer is not None and offer["price"] == 85.0
-assert serper.queries == ["6204-2RS precio comprar"], serper.queries  # plain query, not prose prompt
-print("OK research_price serper plain query")
+assert serper.queries == ["6204-2RS"], serper.queries  # bare part number, no extra words
+assert serper.must_contain == ["6204-2RS"]  # results pre-filtered to the exact part
+print("OK research_price serper plain query + must_contain")
 
 assert find_image_bytes("6204-2RS", "", "Rodamiento sellado", serper) is None
 assert serper.queries[-1] == "6204-2RS"
-print("OK find_image_bytes serper image path")
+print("OK find_image_bytes serper image path (lookalike hit filtered)")
+
+# the must_contain filter itself (no network: feed _post results via monkeypatch)
+from connectors.serper_client import SerperClient, norm_token
+assert norm_token("BFRHP-38N") == "bfrhp38n"
+sc = SerperClient("k")
+sc._post = lambda url, q, c, n: {"organic": [
+    {"title": "Nutrimon NITRA.SAM 28-4-0-6(S) 50 Kg", "snippet": "fertilizante", "link": "https://tierragro.com/x"},
+    {"title": "bfrhp-38n - Pneumatic Threaded Fitting", "snippet": "NITRA recessed hex plug", "link": "https://automationdirect.com/bfrhp-38n"},
+]}
+r = sc.web_search("BFRHP-38N NITRA precio comprar", must_contain="BFRHP-38N")
+assert r["sources"] == ["https://automationdirect.com/bfrhp-38n"], r
+r_all = sc.web_search("BFRHP-38N NITRA precio comprar")
+assert len(r_all["sources"]) == 2  # no filter -> both kept
+print("OK serper must_contain drops wrong-product hits")
+
+# page_url short-circuit: a validated price-research page is used before any search
+import core.product_images as pi
+pi._try_page = lambda url: b"IMG" if url == "https://good.example/p/6204-2rs" else None
+assert pi.find_image_bytes("6204-2RS", "", "", None, page_url="https://good.example/p/6204-2rs") == b"IMG"
+assert pi.find_image_bytes("6204-2RS", "", "", None, page_url="https://dead.example/x") is None
+print("OK find_image_bytes page_url first, no search needed")
 
 print("ALL OK")

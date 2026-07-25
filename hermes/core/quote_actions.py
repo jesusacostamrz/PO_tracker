@@ -115,6 +115,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             return _flush(out)
 
     # --- customer partner ---
+    img_cand: dict[int, tuple[str, str, str]] = {}  # pid -> (part, desc, mfr), filled on live create
+    offer_urls: dict[int, str] = {}                 # pid -> validated price-research page
     partner = _find_partner(odoo, customer, cfg["rfq"]["match"].get("partner_threshold", 85),
                             aliases=cfg["rfq"].get("customer_aliases") or {})
     if not partner:
@@ -179,36 +181,24 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                    f"({len(auto_lines)} auto, {len(queue_lines)} at price 0, "
                    f"{len(created_products)} product(s) auto-created)", "ok")
 
-            # Product images (best-effort; a failure here must never fail the RFQ):
+            # Product image candidates (attached AFTER the pricing pass below, so
+            # a price-research source page can double as the image source):
             # every product on the quote that has no image yet — auto-created ones
             # always, existing catalog products only when image_128 is empty.
             if search is not None:
-                try:
-                    from core.product_images import find_image_bytes
-                except ImportError:
-                    find_image_bytes = None
-                if find_image_bytes:
-                    created_ids = {pid for pid, _ in created_by_key.values()}
-                    cand: dict[int, tuple[str, str, str]] = {}
-                    for m in auto + queue:
-                        pid = (m.product or {}).get("id")
-                        if pid and pid not in cand:
-                            cand[pid] = (m.line.get("part_number") or "",
-                                         m.line.get("description") or "",
-                                         m.line.get("manufacturer") or "")
-                    existing_ids = [p for p in cand if p not in created_ids]
-                    have_img = {rec["id"] for rec in odoo.search_read(
-                        "product.product", [["id", "in", existing_ids]], ["image_128"])
-                        if rec.get("image_128")} if existing_ids else set()
-                    for pid, (part, desc, mfr) in cand.items():
-                        if pid in have_img:
-                            continue
-                        try:
-                            img = find_image_bytes(part, mfr, desc, search)
-                            if img and odoo.set_product_image(pid, img):
-                                _audit("product_image", f"attached image to product {pid}", "ok")
-                        except Exception as exc:
-                            _audit("product_image", f"product {pid}: {type(exc).__name__}: {exc}", "error")
+                created_ids = {pid for pid, _ in created_by_key.values()}
+                cand: dict[int, tuple[str, str, str]] = {}
+                for m in auto + queue:
+                    pid = (m.product or {}).get("id")
+                    if pid and pid not in cand:
+                        cand[pid] = (m.line.get("part_number") or "",
+                                     m.line.get("description") or "",
+                                     m.line.get("manufacturer") or "")
+                existing_ids = [p for p in cand if p not in created_ids]
+                have_img = {rec["id"] for rec in odoo.search_read(
+                    "product.product", [["id", "in", existing_ids]], ["image_128"])
+                    if rec.get("image_128")} if existing_ids else set()
+                img_cand.update({pid: v for pid, v in cand.items() if pid not in have_img})
 
     # --- Pricing Queue rows (LIVE only; dry-run just audits intent) ---
     if queue and not dry and partner:
@@ -229,6 +219,12 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                     web_price = offer.get("price") or ""
                     web_currency = offer.get("currency") or ""
                     web_source = offer.get("url") or ""
+                    pid = (m.product or {}).get("id")
+                    # only a PRICED offer guarantees an exact product page — a
+                    # reference-only url may be a catalog page whose og:image
+                    # is a site banner, not the product
+                    if pid and web_source and offer.get("price") is not None:
+                        offer_urls.setdefault(pid, web_source)
             sheets.append_row(pq_tab, [
                 _now(), customer, rfq_ref, out.order_name, out.order_id or "",
                 m.line.get("part_number") or "", m.line.get("description") or "",
@@ -244,6 +240,23 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                                      f" — {m.reason}", "dry-run")
         if len(queue) > 5:
             _audit("needs_pricing", f"... and {len(queue) - 5} more line(s)", "dry-run")
+
+    # --- product images (best-effort; a failure here must never fail the RFQ) ---
+    # Runs after pricing so the validated price-research page doubles as the
+    # image source (one web search per product); search engines are the fallback.
+    if img_cand:
+        try:
+            from core.product_images import find_image_bytes
+        except ImportError:
+            find_image_bytes = None
+        if find_image_bytes:
+            for pid, (part, desc, mfr) in img_cand.items():
+                try:
+                    img = find_image_bytes(part, mfr, desc, search, page_url=offer_urls.get(pid))
+                    if img and odoo.set_product_image(pid, img):
+                        _audit("product_image", f"attached image to product {pid}", "ok")
+                except Exception as exc:
+                    _audit("product_image", f"product {pid}: {type(exc).__name__}: {exc}", "error")
 
     # --- Quotes row (lockstep with QUOTES_HEADERS) ---
     quotes_row = [
