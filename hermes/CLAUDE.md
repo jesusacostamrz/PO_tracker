@@ -116,7 +116,9 @@ Three layers, deliberately separated:
 - All secrets live in `hermes/.secrets/.env` (gitignored; `chmod 600` on the VPS),
   referenced from the YAML as `${VAR}`. Create it from `.env.example`. Google OAuth/token
   and service-account JSON also live under `.secrets/`. Nothing here is ever committed.
-  Web price research + product image lookups ride the existing OpenAI key (Responses API
-  `web_search` tool) — on iff the LLM key is set and `base_url` is OpenAI; no extra secret.
+  Web price research + product image lookups prefer Google via serper.dev when
+  `SERPER_API_KEY` is set (better exact-SKU retrieval + direct Google Images);
+  otherwise they ride the existing OpenAI key (Responses API `web_search` tool),
+  on iff the LLM key is set and `base_url` is OpenAI.
 - `config/hermes.config.yaml` holds all non-secret settings (company identity, matching
   thresholds, write toggles, digest schedule). Tune behavior here, not in code.

@@ -127,12 +127,14 @@ def main() -> int:
         return 1
     llm = LLMClient.from_config(cfg)
     try:  # web search is optional (off if no API key) — never a hard dependency
+        from connectors.serper_client import SerperClient
         from connectors.search_client import SearchClient
-        search = SearchClient.from_config(cfg)
+        search = SerperClient.from_config(cfg) or SearchClient.from_config(cfg)
     except ImportError:
         search = None
     print(f"RFQ intake  Gmail: {gm.account}  Odoo db: {cfg['odoo']['db']}  "
-          f"mode: {'DRY-RUN' if dry else 'LIVE'}  web-pricing: {'on' if search else 'off'}")
+          f"mode: {'DRY-RUN' if dry else 'LIVE'}  "
+          f"web-pricing: {getattr(search, 'kind', 'openai') if search else 'off'}")
 
     while True:
         try:

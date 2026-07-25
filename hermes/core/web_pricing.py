@@ -31,13 +31,18 @@ def research_price(line: dict, llm, search) -> dict | None:
     if not subject:
         return None
 
-    prompt = (
-        f"Busca ofertas de compra actuales para esta pieza exacta: {subject}. "
-        f"Descripcion: {desc}. Cantidad requerida: {line.get('quantity', 1)}. "
-        "Prioriza proveedores que vendan y envien dentro de Mexico. "
-        "Si no hay disponibilidad en Mexico, lista ofertas internacionales. "
-        "Para cada oferta incluye: precio, moneda, proveedor y URL del producto."
-    )
+    if getattr(search, "kind", "") == "serper":
+        # plain Google query — the exact-SKU page ranks first; snippets+links
+        # go to the extractor below just like LLM search output
+        prompt = f"{subject} precio comprar"
+    else:
+        prompt = (
+            f"Busca ofertas de compra actuales para esta pieza exacta: {subject}. "
+            f"Descripcion: {desc}. Cantidad requerida: {line.get('quantity', 1)}. "
+            "Prioriza proveedores que vendan y envien dentro de Mexico. "
+            "Si no hay disponibilidad en Mexico, lista ofertas internacionales. "
+            "Para cada oferta incluye: precio, moneda, proveedor y URL del producto."
+        )
 
     try:
         result = search.web_search(prompt, country="MX")

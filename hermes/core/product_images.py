@@ -46,6 +46,14 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
     if not subject:
         return None
 
+    if getattr(search, "kind", "") == "serper":
+        # Google Images gives direct image URLs — no page scraping needed
+        for img_url in search.image_urls(subject, country="MX"):
+            data = _download_image(img_url)
+            if data:
+                return data
+        return None
+
     try:
         result = search.web_search(f"Pagina de producto para: {subject}", country="MX")
     except Exception as e:
@@ -76,7 +84,10 @@ def _try_page(page_url: str) -> bytes | None:
         img_url = "https:" + img_url
     else:
         img_url = urljoin(page_url, img_url)
+    return _download_image(img_url)
 
+
+def _download_image(img_url: str) -> bytes | None:
     try:
         req = urllib.request.Request(img_url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=15) as resp:

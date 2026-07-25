@@ -55,4 +55,29 @@ print("OK _og_image_url json-ld fallback")
 assert find_image_bytes("6204-2RS", "", "Rodamiento sellado", None) is None
 print("OK find_image_bytes None search")
 
+
+# --- serper path: plain query built from the part, same result shape ---
+class StubSerper:
+    kind = "serper"
+    def __init__(self):
+        self.queries = []
+    def web_search(self, prompt, country="MX"):
+        self.queries.append(prompt)
+        return {"text": "- Rodamiento 6204-2RS | $85 MXN | https://example.com/p/6204",
+                "sources": ["https://example.com/p/6204"]}
+    def image_urls(self, query, country="MX", limit=5):
+        self.queries.append(query)
+        return []  # empty -> find_image_bytes degrades to None, no scraping attempted
+
+serper = StubSerper()
+offer = research_price(line, StubLLM({"price": 85.0, "currency": "MXN", "vendor": "X",
+                                       "url": "https://example.com/p/6204", "note": ""}), serper)
+assert offer is not None and offer["price"] == 85.0
+assert serper.queries == ["6204-2RS precio comprar"], serper.queries  # plain query, not prose prompt
+print("OK research_price serper plain query")
+
+assert find_image_bytes("6204-2RS", "", "Rodamiento sellado", serper) is None
+assert serper.queries[-1] == "6204-2RS"
+print("OK find_image_bytes serper image path")
+
 print("ALL OK")

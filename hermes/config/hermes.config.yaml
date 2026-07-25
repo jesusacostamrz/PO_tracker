@@ -56,6 +56,12 @@ llm:
   model: ${LLM_MODEL}               # text model, e.g. gpt-4o-mini / glm-4.6
   vision_model: ${LLM_VISION_MODEL} # for scanned/image POs, e.g. gpt-4o / glm-4v
 
+serper:
+  # Google search via serper.dev — used for web price research + product images
+  # when the key is set (better exact-SKU retrieval than LLM web search).
+  # Leave the env var unset to fall back to OpenAI web_search.
+  api_key_env: SERPER_API_KEY
+
 matching:
   candidate_states: [draft, sent]
   lookback_days: 120
