@@ -114,10 +114,12 @@ def run_once(odoo, sheets, cfg, dry, llm=None) -> int:
                                                  description=desc if part else "",
                                                  extra=extra_vals)
                 _audit("odoo_create_product", f"created product {product_id} '{(part or desc)[:40]}'", "ok")
-                if llm is not None and (cfg["rfq"].get("product_defaults") or {}).get("unspsc", True):
+                pdef = cfg["rfq"].get("product_defaults") or {}
+                if llm is not None and pdef.get("unspsc", True):
                     try:
                         set_unspsc(odoo, llm,
-                                   [(product_id, part or desc, part, desc, _cell(r, PQ_BRAND))], _audit)
+                                   [(product_id, part or desc, part, desc, _cell(r, PQ_BRAND))],
+                                   _audit, fallback=str(pdef.get("unspsc_fallback") or ""))
                     except Exception as exc:
                         _audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
             elif use_id:

@@ -53,6 +53,7 @@ rfq:
     income_account: "401.01.01"    # POR COBRAR: Ventas y/o servicios gravados a la tasa general
     expense_account: "502.01.01"   # POR PAGAR: Compras
     unspsc: true
+    unspsc_fallback: "20121445"    # Accesorios y partes — used when a confident pick isn't possible
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.

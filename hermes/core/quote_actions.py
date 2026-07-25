@@ -67,13 +67,14 @@ def product_extra_vals(odoo, cfg, audit) -> dict:
     return extra
 
 
-def set_unspsc(odoo, llm, created: list[tuple], audit) -> None:
+def set_unspsc(odoo, llm, created: list[tuple], audit, fallback: str = "") -> None:
     """Catalog-grounded UNSPSC classification for freshly created products.
 
     The LLM never invents a code: it names the product type (one Spanish noun),
     the real Odoo UNSPSC catalog is searched for that noun, and the LLM then
     picks only among those real candidates — so a valve can only land in a
-    valve-family category. Anything unresolvable is skipped, never guessed.
+    valve-family category. Anything unresolvable gets the `fallback` code
+    (e.g. 20121445 Accesorios y partes) when configured, else stays empty.
     """
     items = [{"id": pid, "part": part, "description": desc, "brand": mfr}
              for pid, _name, part, desc, mfr in created]
@@ -97,20 +98,29 @@ def set_unspsc(odoo, llm, created: list[tuple], audit) -> None:
             ask.append({**it, "candidates": cands})
         else:
             audit("unspsc", f"product {it['id']}: no catalog match for "
-                            f"'{nouns.get(it['id'], '?')}' — skipped", "skipped")
-    if not ask:
-        return
-    resp = llm.chat_json(system=_UNSPSC_PICK_SYSTEM,
-                         user=json.dumps(ask, ensure_ascii=False), max_tokens=3000)
-    allowed = {it["id"]: {c["code"] for c in it["candidates"]} for it in ask}
-    for row in (resp or {}).get("codes") or []:
-        pid, code = row.get("id"), str(row.get("code") or "").strip()
-        if not pid or code not in allowed.get(int(pid), set()):
-            continue  # outside the product's own candidate list -> refuse
-        uid = odoo.unspsc_id(code)
-        if uid:
-            odoo.execute("product.product", "write", [int(pid)], {"unspsc_code_id": uid})
-            audit("unspsc", f"product {pid}: UNSPSC {code}", "ok")
+                            f"'{nouns.get(it['id'], '?')}'", "skipped")
+    written: set[int] = set()
+    if ask:
+        resp = llm.chat_json(system=_UNSPSC_PICK_SYSTEM,
+                             user=json.dumps(ask, ensure_ascii=False), max_tokens=3000)
+        allowed = {it["id"]: {c["code"] for c in it["candidates"]} for it in ask}
+        for row in (resp or {}).get("codes") or []:
+            pid, code = row.get("id"), str(row.get("code") or "").strip()
+            if not pid or code not in allowed.get(int(pid), set()):
+                continue  # outside the product's own candidate list -> refuse
+            uid = odoo.unspsc_id(code)
+            if uid:
+                odoo.execute("product.product", "write", [int(pid)], {"unspsc_code_id": uid})
+                audit("unspsc", f"product {pid}: UNSPSC {code}", "ok")
+                written.add(int(pid))
+
+    # anything still unclassified gets the configured generic fallback
+    fb_uid = odoo.unspsc_id(fallback) if fallback else None
+    if fb_uid:
+        for it in items:
+            if it["id"] not in written:
+                odoo.execute("product.product", "write", [it["id"]], {"unspsc_code_id": fb_uid})
+                audit("unspsc", f"product {it['id']}: fallback {fallback}", "ok")
 
 
 @dataclass
@@ -274,7 +284,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             # UNSPSC classification for new products (best-effort, one LLM call)
             if created_products and llm is not None and pdef.get("unspsc", True):
                 try:
-                    set_unspsc(odoo, llm, created_products, _audit)
+                    set_unspsc(odoo, llm, created_products, _audit,
+                               fallback=str(pdef.get("unspsc_fallback") or ""))
                 except Exception as exc:
                     _audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
 

@@ -199,7 +199,7 @@ class StubOdooU:
                     {"code": "40141603", "name": "Valvulas neumaticas"}]
         return []  # unknown noun -> no candidates
     def unspsc_id(self, code):
-        return 777 if code == "40141603" else None
+        return {"40141603": 777, "20121445": 888}.get(code)
     def execute(self, model, method, ids, vals):
         self.written.append((ids, vals))
 
@@ -215,9 +215,9 @@ so = StubOdooU()
 set_unspsc(so, TwoStepLLM(),
            [(6499, "AVS-5211-24D", "AVS-5211-24D", "valvula solenoide 24VDC", "MEAD"),
             (6500, "X", "X", "cosa rara", "")],
-           lambda a, d, s: audits.append((a, s)))
-assert so.written == [([6499], {"unspsc_code_id": 777})], so.written
-assert ("unspsc", "skipped") in audits  # the no-candidate product was skipped, not guessed
-print("OK set_unspsc catalog-grounded pick")
+           lambda a, d, s: audits.append((a, s)), fallback="20121445")
+assert so.written == [([6499], {"unspsc_code_id": 777}),
+                      ([6500], {"unspsc_code_id": 888})], so.written  # unresolvable -> fallback
+print("OK set_unspsc catalog-grounded pick + Accesorios y partes fallback")
 
 print("ALL OK")
