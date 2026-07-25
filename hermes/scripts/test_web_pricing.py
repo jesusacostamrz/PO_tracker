@@ -187,28 +187,37 @@ assert pi.find_image_bytes("MHL-4", "FABCO", "valvula", StubSerperShortPart()) =
 assert pi.find_image_bytes("MHL-4", "", "valvula", StubSerperShortPart()) == b"BAD"  # no brand known -> old behavior
 print("OK find_image_bytes short part requires brand in hit")
 
-# set_unspsc: only 8-digit codes that exist in Odoo's catalog get written
+# set_unspsc: catalog-grounded — noun -> real catalog candidates -> pick among them only
 from core.quote_actions import set_unspsc
 
 class StubOdooU:
     def __init__(self):
         self.written = []
+    def search_read(self, model, domain, fields, limit=None, order=None):
+        if domain[0][2] == "valvula":
+            return [{"code": "40141602", "name": "Valvulas solenoides"},
+                    {"code": "40141603", "name": "Valvulas neumaticas"}]
+        return []  # unknown noun -> no candidates
     def unspsc_id(self, code):
         return 777 if code == "40141603" else None
     def execute(self, model, method, ids, vals):
         self.written.append((ids, vals))
 
+class TwoStepLLM:
+    def chat_json(self, system, user, max_tokens=400):
+        if "noun" in system:
+            return {"nouns": [{"id": 6499, "noun": "valvula"}, {"id": 6500, "noun": "gizmo"}]}
+        return {"codes": [{"id": 6499, "code": "40141603"},   # in 6499's candidates -> written
+                          {"id": 6500, "code": "40151500"}]}  # 6500 had no candidates -> refused
+
 audits = []
 so = StubOdooU()
-set_unspsc(so, StubLLM({"codes": [
-    {"id": 6499, "code": "40141603"},       # valid, in catalog -> written
-    {"id": 6500, "code": "99999999"},       # not in catalog -> skipped
-    {"id": 6501, "code": "4014"},           # not 8 digits -> ignored
-]}), [(6499, "ASD-44-24D", "ASD-44-24D", "valvula", "FABCO"),
-      (6500, "X", "X", "", ""), (6501, "Y", "Y", "", "")],
-    lambda a, d, s: audits.append((a, s)))
+set_unspsc(so, TwoStepLLM(),
+           [(6499, "AVS-5211-24D", "AVS-5211-24D", "valvula solenoide 24VDC", "MEAD"),
+            (6500, "X", "X", "cosa rara", "")],
+           lambda a, d, s: audits.append((a, s)))
 assert so.written == [([6499], {"unspsc_code_id": 777})], so.written
-assert ("unspsc", "skipped") in audits
-print("OK set_unspsc writes only catalog-valid codes")
+assert ("unspsc", "skipped") in audits  # the no-candidate product was skipped, not guessed
+print("OK set_unspsc catalog-grounded pick")
 
 print("ALL OK")

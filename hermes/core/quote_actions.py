@@ -27,12 +27,21 @@ from core.product_matcher import LineMatch, norm_code
 # Quotes tab column indices (0-based). Lockstep with QUOTES_HEADERS in setup_sheet.py.
 Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 7, 8, 9
 
-_UNSPSC_SYSTEM = (
-    "You classify industrial products with UNSPSC codes (8-digit commodity level) for "
-    "Mexican CFDI. Given a JSON list of products, return ONLY a JSON object "
-    '{"codes": [{"id": <product id>, "code": "########"}]} with the most specific '
-    "commodity code per product. Omit any product you cannot classify confidently — "
-    "a missing code is fine, a wrong one is not."
+_UNSPSC_NOUN_SYSTEM = (
+    "For each industrial product, give ONE Spanish singular noun naming what the product "
+    "IS. Use the most GENERIC base noun, without accents, never a compound term — "
+    "electrovalvula -> valvula, niple -> conector, manifold -> colector, racor -> conector "
+    "(e.g. valvula, conector, cilindro, bomba, manguera, filtro, regulador, silenciador, "
+    "tuberia). Return ONLY JSON: {\"nouns\": [{\"id\": <product id>, \"noun\": \"...\"}]}. "
+    "Omit products you cannot identify."
+)
+
+_UNSPSC_PICK_SYSTEM = (
+    "You assign UNSPSC categories for Mexican CFDI. Each product comes with a list of "
+    "candidate categories {code, name} taken from the real catalog — you MUST pick from "
+    "that product's own candidates, choosing the most specific match. Return ONLY JSON: "
+    '{"codes": [{"id": <product id>, "code": "########"}]}. Omit a product when none of '
+    "its candidates fits — a missing code is fine, a wrong one is not."
 )
 
 
@@ -59,22 +68,49 @@ def product_extra_vals(odoo, cfg, audit) -> dict:
 
 
 def set_unspsc(odoo, llm, created: list[tuple], audit) -> None:
-    """One batched LLM call proposes UNSPSC codes for freshly created products;
-    a code is written only if it exists in this Odoo's UNSPSC catalog."""
+    """Catalog-grounded UNSPSC classification for freshly created products.
+
+    The LLM never invents a code: it names the product type (one Spanish noun),
+    the real Odoo UNSPSC catalog is searched for that noun, and the LLM then
+    picks only among those real candidates — so a valve can only land in a
+    valve-family category. Anything unresolvable is skipped, never guessed.
+    """
     items = [{"id": pid, "part": part, "description": desc, "brand": mfr}
              for pid, _name, part, desc, mfr in created]
-    resp = llm.chat_json(system=_UNSPSC_SYSTEM,
-                         user=json.dumps(items, ensure_ascii=False), max_tokens=3000)
+    resp = llm.chat_json(system=_UNSPSC_NOUN_SYSTEM,
+                         user=json.dumps(items, ensure_ascii=False), max_tokens=2000)
+    nouns = {int(r["id"]): str(r.get("noun") or "").strip().lower()
+             for r in (resp or {}).get("nouns") or [] if r.get("id")}
+
+    cand_by_noun: dict[str, list[dict]] = {}
+    for noun in set(nouns.values()):
+        if not noun:
+            continue
+        recs = odoo.search_read("product.unspsc.code",
+                                [["name", "ilike", noun]], ["code", "name"], limit=60)
+        cand_by_noun[noun] = [{"code": r["code"], "name": r["name"]} for r in recs]
+
+    ask = []
+    for it in items:
+        cands = cand_by_noun.get(nouns.get(it["id"], ""), [])
+        if cands:
+            ask.append({**it, "candidates": cands})
+        else:
+            audit("unspsc", f"product {it['id']}: no catalog match for "
+                            f"'{nouns.get(it['id'], '?')}' — skipped", "skipped")
+    if not ask:
+        return
+    resp = llm.chat_json(system=_UNSPSC_PICK_SYSTEM,
+                         user=json.dumps(ask, ensure_ascii=False), max_tokens=3000)
+    allowed = {it["id"]: {c["code"] for c in it["candidates"]} for it in ask}
     for row in (resp or {}).get("codes") or []:
         pid, code = row.get("id"), str(row.get("code") or "").strip()
-        if not (pid and code.isdigit() and len(code) == 8):
-            continue
+        if not pid or code not in allowed.get(int(pid), set()):
+            continue  # outside the product's own candidate list -> refuse
         uid = odoo.unspsc_id(code)
         if uid:
             odoo.execute("product.product", "write", [int(pid)], {"unspsc_code_id": uid})
             audit("unspsc", f"product {pid}: UNSPSC {code}", "ok")
-        else:
-            audit("unspsc", f"product {pid}: code {code} not in Odoo catalog", "skipped")
 
 
 @dataclass
