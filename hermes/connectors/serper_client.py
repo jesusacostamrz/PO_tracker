@@ -37,7 +37,8 @@ class SerperClient:
         return cls(key) if key else None
 
     def _post(self, url: str, query: str, country: str, num: int) -> dict:
-        body = json.dumps({"q": query, "gl": country.lower(), "hl": "es", "num": num}).encode("utf-8")
+        hl = "es" if country.lower() == "mx" else "en"
+        body = json.dumps({"q": query, "gl": country.lower(), "hl": hl, "num": num}).encode("utf-8")
         req = urllib.request.Request(
             url, data=body, method="POST",
             headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},

@@ -102,6 +102,26 @@ r_all = sc.web_search("BFRHP-38N NITRA precio comprar")
 assert len(r_all["sources"]) == 2  # no filter -> both kept
 print("OK serper must_contain drops wrong-product hits")
 
+# US-locale fallback when MX-localized Google has nothing for the part
+class StubSerperUSOnly:
+    kind = "serper"
+    def __init__(self):
+        self.countries = []
+    def web_search(self, prompt, country="MX", must_contain=None):
+        self.countries.append(country)
+        if country == "MX":
+            return None
+        return {"text": "- BFMC-38N Pneumatic Fitting | $14.50 | https://automationdirect.com/bfmc-38n",
+                "sources": ["https://automationdirect.com/bfmc-38n"]}
+
+us = StubSerperUSOnly()
+offer = research_price({"part_number": "BFMC-38N", "description": "", "manufacturer": "", "quantity": 1},
+                       StubLLM({"price": 14.5, "currency": "USD", "vendor": "AutomationDirect",
+                                "url": "https://automationdirect.com/bfmc-38n", "note": ""}), us)
+assert offer is not None and offer["price"] == 14.5
+assert us.countries == ["MX", "US"], us.countries
+print("OK research_price US fallback when MX empty")
+
 # page_url short-circuit: a validated price-research page is used before any search
 import core.product_images as pi
 pi._try_page = lambda url: b"IMG" if url == "https://good.example/p/6204-2rs" else None

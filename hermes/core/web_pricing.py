@@ -39,6 +39,11 @@ def research_price(line: dict, llm, search) -> dict | None:
             # BEFORE extraction, so a junk hit can't become the fallback link.
             result = search.web_search(part or desc, country="MX",
                                        must_contain=part or None)
+            if not result:
+                # MX-localized Google often lacks US-catalog parts entirely —
+                # a US-locale hit (still exact-part-validated) beats nothing
+                result = search.web_search(part or desc, country="US",
+                                           must_contain=part or None)
         else:
             prompt = (
                 f"Busca ofertas de compra actuales para esta pieza exacta: {subject}. "
