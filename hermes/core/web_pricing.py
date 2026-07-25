@@ -33,17 +33,26 @@ def research_price(line: dict, llm, search) -> dict | None:
 
     try:
         if getattr(search, "kind", "") == "serper":
-            # bare part number, exactly what a human types — Google ranks the
-            # exact-SKU page first; extra words (brand, "precio comprar") pull
-            # in lookalikes. Results that never mention the part are dropped
-            # BEFORE extraction, so a junk hit can't become the fallback link.
-            result = search.web_search(part or desc, country="MX",
-                                       must_contain=part or None)
-            if not result:
-                # MX-localized Google often lacks US-catalog parts entirely —
-                # a US-locale hit (still exact-part-validated) beats nothing
-                result = search.web_search(part or desc, country="US",
-                                           must_contain=part or None)
+            # Query ladder, stop at the first tier with validated results:
+            # 1) bare part number, exactly what a human types — Google ranks the
+            #    exact-SKU page first; extra words pull in lookalikes
+            # 2) part + brand — long/generic part numbers sometimes need the
+            #    brand to rank; safe because must_contain still requires the
+            #    exact part in every surviving result
+            # Each tier tries MX first, then US (MX-localized Google often
+            # lacks US-catalog parts entirely).
+            queries = [part or desc]
+            if part and mfr:
+                queries.append(f"{part} {mfr}")
+            result = None
+            for q in queries:
+                for country in ("MX", "US"):
+                    result = search.web_search(q, country=country,
+                                               must_contain=part or None)
+                    if result:
+                        break
+                if result:
+                    break
         else:
             prompt = (
                 f"Busca ofertas de compra actuales para esta pieza exacta: {subject}. "

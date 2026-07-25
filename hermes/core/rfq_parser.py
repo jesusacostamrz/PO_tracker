@@ -43,7 +43,7 @@ Return ONLY a JSON object (null where absent):
   "line_items": [
     {{"part_number": string,  // manufacturer part number / catalog code; null if only a description
       "description": string,  // what the item is, as written
-      "manufacturer": string, // brand/maker column if included (e.g. NITRA, SMC, BIMBA); else null
+      "manufacturer": string, // brand/maker (e.g. NITRA, SMC, BIMBA) — from a brand column OR embedded in the description; else null
       "quantity": number}}    // requested quantity; default 1 if truly absent
   ]
 }}

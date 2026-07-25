@@ -122,6 +122,27 @@ assert offer is not None and offer["price"] == 14.5
 assert us.countries == ["MX", "US"], us.countries
 print("OK research_price US fallback when MX empty")
 
+# part+brand ladder tier: fires only when the bare-part query finds nothing
+class StubSerperBrandOnly:
+    kind = "serper"
+    def __init__(self):
+        self.queries = []
+    def web_search(self, prompt, country="MX", must_contain=None):
+        self.queries.append(prompt)
+        if "NITRA" not in prompt:
+            return None
+        return {"text": "- BFHB-12N-38N NITRA hose barb | $5.25 | https://automationdirect.com/x",
+                "sources": ["https://automationdirect.com/x"]}
+
+br = StubSerperBrandOnly()
+offer = research_price({"part_number": "BFHB-12N-38N", "description": "conector", "manufacturer": "NITRA",
+                        "quantity": 1},
+                       StubLLM({"price": 5.25, "currency": "USD", "vendor": "AD",
+                                "url": "https://automationdirect.com/x", "note": ""}), br)
+assert offer is not None and offer["price"] == 5.25
+assert br.queries == ["BFHB-12N-38N", "BFHB-12N-38N", "BFHB-12N-38N NITRA"], br.queries
+print("OK research_price part+brand ladder tier")
+
 # page_url short-circuit: a validated price-research page is used before any search
 import core.product_images as pi
 pi._try_page = lambda url: b"IMG" if url == "https://good.example/p/6204-2rs" else None

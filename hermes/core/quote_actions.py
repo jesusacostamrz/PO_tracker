@@ -232,6 +232,7 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                 (m.product or {}).get("name") or "", (m.product or {}).get("id") or "",
                 m.reason, "Pending", "", "", "", "",
                 web_price, web_currency, web_source,
+                m.line.get("manufacturer") or "",
             ])
         _audit("sheet_upsert", f"queued {len(queue)} line(s) in Pricing Queue", "ok")
     elif queue and dry:

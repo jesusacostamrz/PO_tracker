@@ -89,6 +89,7 @@ PQ_HEADERS = [
     "Status",                                                        # 11   L
     "Sale Price", "Use Product ID", "Create Product?", "Human Notes",# 12-15 M-P (human-owned)
     "Web Price", "Web Currency", "Web Source",                       # 16-18 Q-S (Hermes-owned)
+    "Brand",                                                         # 19   T (Hermes-owned; parser-detected, used in search ladder)
 ]
 PQ_DROPDOWNS = {
     11: ["Pending", "Resolved", "Error"],   # Status (Hermes-owned)
