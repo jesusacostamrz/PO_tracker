@@ -143,6 +143,27 @@ assert offer is not None and offer["price"] == 5.25
 assert br.queries == ["BFHB-12N-38N", "BFHB-12N-38N", "BFHB-12N-38N NITRA"], br.queries
 print("OK research_price part+brand ladder tier")
 
+# prefix-stripped last resort: vendors list "C-7030-DXP-00MC" as "7030-DXP-00MC"
+class StubSerperNoPrefix:
+    kind = "serper"
+    def __init__(self):
+        self.keys = []
+    def web_search(self, prompt, country="MX", must_contain=None):
+        self.keys.append(must_contain)
+        if must_contain == "7030-DXP-00MC":
+            return {"text": "- Bimba 7030-DXP-00MC 3in cylinder | https://ebay.com/x",
+                    "sources": ["https://ebay.com/x"]}
+        return None  # exact "C-..." never appears in any vendor title
+
+np = StubSerperNoPrefix()
+ref = research_price({"part_number": "C-7030-DXP-00MC", "description": "cilindro", "manufacturer": "BIMBA",
+                      "quantity": 1},
+                     StubLLM({"price": None, "url": "https://ebay.com/x", "vendor": "eBay",
+                              "note": "prefix variant"}), np)
+assert ref is not None and ref["price"] is None and ref["url"] == "https://ebay.com/x"
+assert np.keys[0] == "C-7030-DXP-00MC" and np.keys[-1] == "7030-DXP-00MC", np.keys
+print("OK research_price prefix-stripped last resort")
+
 # page_url short-circuit: a validated price-research page is used before any search
 import core.product_images as pi
 pi._try_page = lambda url: b"IMG" if url == "https://good.example/p/6204-2rs" else None

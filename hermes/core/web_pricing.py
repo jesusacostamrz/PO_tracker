@@ -7,6 +7,8 @@ that exactly like "no suggestion available".
 """
 from __future__ import annotations
 
+import re
+
 _SYSTEM = """You extract the single best CURRENT purchase offer for one exact part
 from raw web-search results. Prefer Mexican vendors when available. STRICT rule:
 the offer's own part number must be EXACTLY the requested one (same prefix, same
@@ -40,15 +42,25 @@ def research_price(line: dict, llm, search) -> dict | None:
             #    brand to rank; safe because must_contain still requires the
             #    exact part in every surviving result
             # Each tier tries MX first, then US (MX-localized Google often
-            # lacks US-catalog parts entirely).
+            # lacks US-catalog parts entirely). Last resort: vendors often list
+            # a part WITHOUT its letter prefix (Bimba "C-7030-DXP-00MC" is sold
+            # as "7030-DXP-00MC"), so retry accepting the prefix-stripped form —
+            # the extractor's exact-part rule still blocks a variant PRICE, so
+            # this can only add reference links/images, never bad prices.
             queries = [part or desc]
             if part and mfr:
                 queries.append(f"{part} {mfr}")
+            keys = [part] if part else [None]
+            stripped = re.sub(r"^[A-Za-z]+[-\s]+", "", part)
+            if part and stripped != part and len(re.sub(r"[^a-zA-Z0-9]", "", stripped)) >= 6:
+                keys.append(stripped)
             result = None
-            for q in queries:
-                for country in ("MX", "US"):
-                    result = search.web_search(q, country=country,
-                                               must_contain=part or None)
+            for key in keys:
+                for q in queries:
+                    for country in ("MX", "US"):
+                        result = search.web_search(q, country=country, must_contain=key)
+                        if result:
+                            break
                     if result:
                         break
                 if result:

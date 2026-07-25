@@ -59,22 +59,28 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         # Only trust a hit whose title/source page mentions the part number:
         # brand words alone drag in unrelated products (wrong image is worse
         # than no image). No part number -> keep first-hit behavior.
-        key = re.sub(r"[^a-z0-9]", "", part.lower())
         # Same query ladder as price research: bare part first (brand words
         # attract lookalikes), part+brand only when that finds nothing; each
         # tier MX first then US. Every hit's title/source must mention the part.
+        # Last resort: accept the letter-prefix-stripped form — vendors list
+        # "C-7030-DXP-00MC" as "7030-DXP-00MC" (min 6 chars to stay selective).
+        keys = [re.sub(r"[^a-z0-9]", "", part.lower())]
+        stripped = re.sub(r"^[a-z]+", "", keys[0])
+        if stripped != keys[0] and len(stripped) >= 6:
+            keys.append(stripped)
         queries = [part or subject]
         if part and mfr:
             queries.append(f"{part} {mfr}")
-        for q in queries:
-            for country in ("MX", "US"):
-                for img in search.image_urls(q, country=country):
-                    hay = re.sub(r"[^a-z0-9]", "", f"{img['title']} {img['link']}".lower())
-                    if key and key not in hay:
-                        continue
-                    data = _download_image(img["url"])
-                    if data:
-                        return data
+        for key in keys:
+            for q in queries:
+                for country in ("MX", "US"):
+                    for img in search.image_urls(q, country=country):
+                        hay = re.sub(r"[^a-z0-9]", "", f"{img['title']} {img['link']}".lower())
+                        if key and key not in hay:
+                            continue
+                        data = _download_image(img["url"])
+                        if data:
+                            return data
         return None
 
     try:
