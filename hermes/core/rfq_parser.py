@@ -84,11 +84,11 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
 
     if texts:
         blob = "\n\n".join(texts)[:_MAX_TEXT_CHARS]
-        result = llm.chat_json(system=system, user="RFQ content:\n\n" + blob, max_tokens=3000)
+        result = llm.chat_json(system=system, user="RFQ content:\n\n" + blob, max_tokens=8000)
         result["_source"] = "text"
     elif image_urls:
         result = llm.vision_json(system=system, user_text="Extract the RFQ from the attached image(s).",
-                                 image_data_urls=image_urls[:4], max_tokens=3000)
+                                 image_data_urls=image_urls[:4], max_tokens=8000)
         result["_source"] = "vision"
     else:
         result = {"customer_name": None, "rfq_ref": None, "line_items": [], "_source": "empty"}

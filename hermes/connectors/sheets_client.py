@@ -8,13 +8,27 @@ the spreadsheet, a tab, or any data.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+
+def _execute(req, tries: int = 3):
+    """Sheets quota is 60 writes/min/user; a big RFQ batch bursts past it.
+    On 429 wait out the minute window and retry instead of dying mid-batch."""
+    for attempt in range(tries):
+        try:
+            return req.execute()
+        except HttpError as e:
+            if e.resp.status != 429 or attempt == tries - 1:
+                raise
+            time.sleep(65)
 
 
 class SheetsError(RuntimeError):
@@ -49,16 +63,15 @@ class SheetsClient:
         return [s["properties"]["title"] for s in self.meta().get("sheets", [])]
 
     def read(self, a1_range: str) -> list[list]:
-        resp = (
+        resp = _execute(
             self.service.spreadsheets().values()
             .get(spreadsheetId=self.spreadsheet_id, range=a1_range)
-            .execute()
         )
         return resp.get("values", [])
 
     # ---- write (additive: append / update; never deletes) ----
     def append_row(self, tab: str, row: list) -> dict:
-        return (
+        return _execute(
             self.service.spreadsheets().values()
             .append(
                 spreadsheetId=self.spreadsheet_id,
@@ -67,11 +80,10 @@ class SheetsClient:
                 insertDataOption="INSERT_ROWS",
                 body={"values": [row]},
             )
-            .execute()
         )
 
     def update_range(self, a1_range: str, rows: list[list]) -> dict:
-        return (
+        return _execute(
             self.service.spreadsheets().values()
             .update(
                 spreadsheetId=self.spreadsheet_id,
@@ -79,15 +91,13 @@ class SheetsClient:
                 valueInputOption="USER_ENTERED",
                 body={"values": rows},
             )
-            .execute()
         )
 
     # ---- structure (additive: create/format tabs; never deletes) ----
     def _batch(self, requests: list[dict]) -> dict:
-        return (
+        return _execute(
             self.service.spreadsheets()
             .batchUpdate(spreadsheetId=self.spreadsheet_id, body={"requests": requests})
-            .execute()
         )
 
     def sheet_ids(self) -> dict[str, int]:

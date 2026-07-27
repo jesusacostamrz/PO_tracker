@@ -46,7 +46,7 @@ class LLMClient:
             resp = self._client.chat.completions.create(response_format={"type": "json_object"}, **base)
         except Exception:
             resp = self._client.chat.completions.create(**base)  # provider lacks response_format
-        return _loads(resp.choices[0].message.content or "")
+        return _loads_choice(resp.choices[0], max_tokens)
 
     def vision_json(self, system: str, user_text: str, image_data_urls: list[str],
                     model=None, temperature=0.0, max_tokens=3000) -> dict:
@@ -60,7 +60,7 @@ class LLMClient:
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": content}],
         )
-        return _loads(resp.choices[0].message.content or "")
+        return _loads_choice(resp.choices[0], max_tokens)
 
     @classmethod
     def from_config(cls, cfg: dict) -> "LLMClient":
@@ -69,6 +69,15 @@ class LLMClient:
         if not key:
             raise RuntimeError(f"Missing {llm['api_key_env']} in .secrets/.env")
         return cls(key, llm.get("base_url", ""), llm["model"], llm.get("vision_model"))
+
+
+def _loads_choice(choice, max_tokens: int) -> dict:
+    """Parse a JSON reply, failing loudly when the model ran out of tokens —
+    a truncated reply otherwise surfaces as a baffling JSONDecodeError."""
+    if choice.finish_reason == "length":
+        raise RuntimeError(f"LLM reply hit max_tokens={max_tokens} and was truncated; "
+                           "raise the cap for this call")
+    return _loads(choice.message.content or "")
 
 
 def _loads(text: str) -> dict:
