@@ -26,7 +26,10 @@ python scripts/setup_sheet.py      # build/repair the Tracker tabs (idempotent, 
 # End-to-end. DEFAULTS TO DRY-RUN (config runtime.dry_run: true). --live actually writes.
 python scripts/process_po.py <po.pdf> [--live] [--odoo-db NAME] [--gmail-msg-id ID]
 python scripts/intake.py [--live] [--odoo-db NAME] [--max N] [--watch SECONDS] [--mark-read]
-python scripts/apply_manual.py [--live] [--odoo-db NAME]   # apply Odoo writes for rows a human resolved via Manual SO # (col K)
+python scripts/apply_manual.py [--live] [--odoo-db NAME]   # apply Odoo writes for rows a human resolved via Manual SO # (col K);
+                                                           # typing NEW/NUEVA there instead creates a DRAFT quote from the PO itself
+                                                           # (lines at the PO's own prices; unmatched products auto-created) and
+                                                           # completes the same workflow on it -> "Matched (new quote)"
 
 # Quotes pipeline (RFQ -> draft Odoo quotation). Same dry-run defaults.
 python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt> [--live]   # local test bench

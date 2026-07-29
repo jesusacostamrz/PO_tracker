@@ -158,6 +158,89 @@ def _find_partner(odoo: OdooClient, name: str, threshold: int,
     return best if best and best_score >= threshold else None
 
 
+def _trusted(m: LineMatch) -> bool:
+    """Only a TRUSTED match (exact part-number, or unambiguous fuzzy >= threshold)
+    may reuse an existing product — the matcher also attaches weak below-threshold/
+    ambiguous guesses to m.product as FYI, and quoting those put an ALTECH locknut
+    on an MHL-4 valve line."""
+    return m.product is not None and m.reason.startswith(("exact part-number match", "fuzzy match"))
+
+
+def _line_name(m: LineMatch) -> str | None:
+    # customer's own wording on the line so the salesperson (and the
+    # customer PDF) see what was asked for, not just our catalog name
+    part = m.line.get("part_number") or ""
+    desc = m.line.get("description") or ""
+    return f"[{part}] {desc}".strip() if part and desc else (desc or part or None)
+
+
+def _create_missing_products(odoo: OdooClient, cfg: dict, matches: list[LineMatch],
+                             audit, price_of=None) -> tuple[list[tuple], set[int]]:
+    """Auto-create a product for every match without a trusted catalog product
+    (dedup by part#, else description) and set m.product in place. Returns
+    (created_products for UNSPSC, created product ids). ``price_of(m)`` sets the
+    new product's sale price (RFQ flow: unknown -> 0; PO flow: the PO's price)."""
+    extra_vals = product_extra_vals(odoo, cfg, audit)
+    created_products: list[tuple[int, str, str, str, str]] = []  # (id, name, part, desc, mfr)
+    created_by_key: dict[str, tuple[int, str]] = {}
+    for m in matches:
+        if _trusted(m):
+            continue
+        part = m.line.get("part_number") or ""
+        key = norm_code(part) if part else f"desc:{(m.line.get('description') or '').strip().lower()}"
+        if key in created_by_key:
+            pid, name = created_by_key[key]
+        else:
+            # Client catalog convention: product name = the part number alone
+            # (no default_code — Odoo would display "[code] name" and mix the
+            # Product/Description columns). Description goes to description_sale.
+            desc = m.line.get("description") or ""
+            name = part or desc or "Unknown item"
+            pid = odoo.create_product(name, list_price=(price_of(m) if price_of else 0.0),
+                                      description=desc if part else "", extra=extra_vals)
+            created_by_key[key] = (pid, name)
+            created_products.append((pid, name, part, desc, m.line.get("manufacturer") or ""))
+            audit("odoo_create_product", f"created product {pid} '{name[:40]}' (part {part or '-'})", "ok")
+        m.product = {"id": pid, "name": name}
+    return created_products, {pid for pid, _ in created_by_key.values()}
+
+
+def _image_candidates(odoo: OdooClient, matches: list[LineMatch],
+                      created_ids: set[int]) -> dict[int, tuple[str, str, str]]:
+    """pid -> (part, desc, mfr) for quote products still needing an image:
+    auto-created ones always, existing catalog products only when image_128 is empty."""
+    cand: dict[int, tuple[str, str, str]] = {}
+    for m in matches:
+        pid = (m.product or {}).get("id")
+        if pid and pid not in cand:
+            cand[pid] = (m.line.get("part_number") or "",
+                         m.line.get("description") or "",
+                         m.line.get("manufacturer") or "")
+    existing_ids = [p for p in cand if p not in created_ids]
+    have_img = {rec["id"] for rec in odoo.search_read(
+        "product.product", [["id", "in", existing_ids]], ["image_128"])
+        if rec.get("image_128")} if existing_ids else set()
+    return {pid: v for pid, v in cand.items() if pid not in have_img}
+
+
+def _attach_images(odoo: OdooClient, img_cand: dict, search, audit,
+                   offer_urls: dict | None = None) -> None:
+    """Best-effort product images; a failure here must never fail the pipeline."""
+    if not img_cand or search is None:
+        return
+    try:
+        from core.product_images import find_image_bytes
+    except ImportError:
+        return
+    for pid, (part, desc, mfr) in img_cand.items():
+        try:
+            img = find_image_bytes(part, mfr, desc, search, page_url=(offer_urls or {}).get(pid))
+            if img and odoo.set_product_image(pid, img):
+                audit("product_image", f"attached image to product {pid}", "ok")
+        except Exception as exc:
+            audit("product_image", f"product {pid}: {type(exc).__name__}: {exc}", "error")
+
+
 def _find_existing(sheets: SheetsClient, tab: str, msg_id: str):
     """(row_1based, blocking) for a prior Quotes row with this Gmail msg id, else None.
 
@@ -228,46 +311,11 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                    f"would create draft quote for {partner['name']}: {len(auto_lines)} auto line(s), "
                    f"{len(queue)} queued", "dry-run")
         else:
-            # Every RFQ line lands on the draft now. Only a TRUSTED match (exact
-            # part-number, or unambiguous fuzzy >= threshold) may reuse an existing
-            # product — the matcher also attaches weak below-threshold/ambiguous
-            # guesses to m.product as FYI for the Pricing Queue, and quoting those
-            # put an ALTECH locknut on an MHL-4 valve line. Untrusted lines get a
-            # product auto-created at price 0 (dedup by part#, else description).
+            # Every RFQ line lands on the draft now: trusted matches reuse their
+            # product, the rest get one auto-created at price 0 (see _trusted /
+            # _create_missing_products).
             pdef = cfg["rfq"].get("product_defaults") or {}
-            extra_vals = product_extra_vals(odoo, cfg, _audit)
-
-            created_products: list[tuple[int, str, str, str, str]] = []  # (id, name, part, desc, mfr)
-            created_by_key: dict[str, tuple[int, str]] = {}
-            for m in queue:
-                trusted = m.reason.startswith(("exact part-number match", "fuzzy match"))
-                if m.product is not None and trusted:
-                    continue
-                part = m.line.get("part_number") or ""
-                key = norm_code(part) if part else f"desc:{(m.line.get('description') or '').strip().lower()}"
-                if key in created_by_key:
-                    pid, name = created_by_key[key]
-                else:
-                    # Client catalog convention: product name = the part number alone
-                    # (no default_code — Odoo would display "[code] name" and mix the
-                    # Product/Description columns). Description goes to description_sale.
-                    desc = m.line.get("description") or ""
-                    name = part or desc or "Unknown item"
-                    pid = odoo.create_product(name, list_price=0.0,
-                                              description=desc if part else "",
-                                              extra=extra_vals)
-                    created_by_key[key] = (pid, name)
-                    created_products.append((pid, name, part, m.line.get("description") or "",
-                                             m.line.get("manufacturer") or ""))
-                    _audit("odoo_create_product", f"created product {pid} '{name[:40]}' (part {part or '-'})", "ok")
-                m.product = {"id": pid, "name": name}
-
-            def _line_name(m):
-                # customer's own wording on the line so the salesperson (and the
-                # customer PDF) see what was asked for, not just our catalog name
-                part = m.line.get("part_number") or ""
-                desc = m.line.get("description") or ""
-                return f"[{part}] {desc}".strip() if part and desc else (desc or part or None)
+            created_products, created_ids = _create_missing_products(odoo, cfg, queue, _audit)
 
             queue_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                            "price_unit": 0.0,
@@ -290,23 +338,9 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                     _audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
 
             # Product image candidates (attached AFTER the pricing pass below, so
-            # a price-research source page can double as the image source):
-            # every product on the quote that has no image yet — auto-created ones
-            # always, existing catalog products only when image_128 is empty.
+            # a price-research source page can double as the image source).
             if search is not None:
-                created_ids = {pid for pid, _ in created_by_key.values()}
-                cand: dict[int, tuple[str, str, str]] = {}
-                for m in auto + queue:
-                    pid = (m.product or {}).get("id")
-                    if pid and pid not in cand:
-                        cand[pid] = (m.line.get("part_number") or "",
-                                     m.line.get("description") or "",
-                                     m.line.get("manufacturer") or "")
-                existing_ids = [p for p in cand if p not in created_ids]
-                have_img = {rec["id"] for rec in odoo.search_read(
-                    "product.product", [["id", "in", existing_ids]], ["image_128"])
-                    if rec.get("image_128")} if existing_ids else set()
-                img_cand.update({pid: v for pid, v in cand.items() if pid not in have_img})
+                img_cand.update(_image_candidates(odoo, auto + queue, created_ids))
 
     # --- Pricing Queue rows (LIVE only; dry-run just audits intent) ---
     if queue and not dry and partner:
@@ -350,22 +384,9 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         if len(queue) > 5:
             _audit("needs_pricing", f"... and {len(queue) - 5} more line(s)", "dry-run")
 
-    # --- product images (best-effort; a failure here must never fail the RFQ) ---
-    # Runs after pricing so the validated price-research page doubles as the
-    # image source (one web search per product); search engines are the fallback.
-    if img_cand:
-        try:
-            from core.product_images import find_image_bytes
-        except ImportError:
-            find_image_bytes = None
-        if find_image_bytes:
-            for pid, (part, desc, mfr) in img_cand.items():
-                try:
-                    img = find_image_bytes(part, mfr, desc, search, page_url=offer_urls.get(pid))
-                    if img and odoo.set_product_image(pid, img):
-                        _audit("product_image", f"attached image to product {pid}", "ok")
-                except Exception as exc:
-                    _audit("product_image", f"product {pid}: {type(exc).__name__}: {exc}", "error")
+    # --- product images: after pricing so the validated price-research page
+    # doubles as the image source (one web search per product) ---
+    _attach_images(odoo, img_cand, search, _audit, offer_urls=offer_urls)
 
     # --- Quotes row (lockstep with QUOTES_HEADERS) ---
     quotes_row = [
@@ -382,3 +403,83 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         sheets.append_row(quotes_tab, quotes_row)
         _audit("sheet_upsert", "appended Quotes row", "ok")
     return _flush(out)
+
+
+# ---- new quote FROM a customer PO (human types NEW in the Tracker's Manual SO #) ----
+
+def po_lines(po: dict) -> list[dict]:
+    """PO line_items -> matcher-shaped lines (customer_item_code is the part#)."""
+    out = []
+    for li in po.get("line_items") or []:
+        if not (li.get("customer_item_code") or li.get("description")):
+            continue
+        out.append({"part_number": li.get("customer_item_code") or "",
+                    "description": li.get("description") or "",
+                    "quantity": li.get("quantity") or 0,
+                    "unit_price": li.get("unit_price")})
+    return out
+
+
+def _po_price(m: LineMatch) -> float:
+    try:
+        return float(m.line.get("unit_price") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def quote_from_po(odoo: OdooClient, cfg: dict, po: dict, matches: list[LineMatch],
+                  audit, llm=None, search=None, dry: bool = False) -> QuoteOutcome:
+    """Create a DRAFT quotation from a customer PO's own lines.
+
+    Every line is priced from the PO itself (the PO states unit prices — no
+    Pricing Queue involved); a line with no trusted catalog match gets its
+    product auto-created at the PO price, same conventions as apply_rfq
+    (part# as name, accounting defaults, UNSPSC, image best-effort).
+    order_id stays None when the customer has no Odoo partner (status
+    'Needs Review' — human fixes the partner/alias and retries) or on dry-run.
+    NEVER confirms or sends anything. Audit/sheet rows are the caller's job.
+    """
+    customer = po.get("customer_name") or ""
+    out = QuoteOutcome(dry_run=dry, status="Dry-run" if dry else "Draft Created",
+                       auto_priced=len(matches))
+    partner = _find_partner(odoo, customer, cfg["rfq"]["match"].get("partner_threshold", 85),
+                            aliases=cfg["rfq"].get("customer_aliases") or {})
+    if not partner:
+        out.status = "Needs Review"
+        out.log(f"Customer '{customer or '?'}' not found in Odoo — no draft created.")
+        audit("needs_review", f"no Odoo partner for '{customer}' (new-quote request)", "ok")
+        return out
+    to_create = sum(1 for m in matches if not _trusted(m))
+    if dry:
+        audit("odoo_create_quote",
+              f"would create draft quote for {partner['name']} from PO {po.get('po_number') or '?'}: "
+              f"{len(matches)} line(s) at PO prices, {to_create} product(s) would be auto-created",
+              "dry-run")
+        return out
+
+    pdef = cfg["rfq"].get("product_defaults") or {}
+    created_products, created_ids = _create_missing_products(odoo, cfg, matches, audit,
+                                                             price_of=_po_price)
+    lines = []
+    for m in matches:
+        l = {"product_id": m.product["id"], "product_uom_qty": m.line.get("quantity") or 0,
+             "price_unit": _po_price(m)}
+        if m.product["id"] in created_ids and (n := _line_name(m)):
+            l["name"] = n
+        lines.append(l)
+    out.order_id = odoo.create_draft_quote(partner["id"], lines,
+                                           client_ref=po.get("po_number") or "")
+    out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""
+    audit("odoo_create_quote",
+          f"created draft {out.order_name} for {partner['name']} from PO "
+          f"({len(lines)} line(s) at PO prices, {len(created_products)} product(s) auto-created)", "ok")
+
+    if created_products and llm is not None and pdef.get("unspsc", True):
+        try:
+            set_unspsc(odoo, llm, created_products, audit,
+                       fallback=str(pdef.get("unspsc_fallback") or ""))
+        except Exception as exc:
+            audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
+    if search is not None:
+        _attach_images(odoo, _image_candidates(odoo, matches, created_ids), search, audit)
+    return out

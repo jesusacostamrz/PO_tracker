@@ -21,7 +21,7 @@ from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 HERMES_BLUE = (0.20, 0.33, 0.51)   # header band (single navy header, no owner bands)
 
 # Status row tints — exceptions pop, matched stays calm-green.
-TINT_MATCHED = (0.85, 0.94, 0.83)   # light green: Matched / Matched (manual)
+TINT_MATCHED = (0.85, 0.94, 0.83)   # light green: Matched / Matched (manual) / Matched (new quote)
 TINT_REVIEW = (1.00, 0.93, 0.74)    # amber: Needs Review
 TINT_NOMATCH = (1.00, 0.80, 0.80)   # red: No Match
 
@@ -47,7 +47,7 @@ ORDERS_HIDDEN_COLS = [8, 11, 12, 13, 14, 15, 16, 18]
 YN = ["Yes", "No"]
 YND = ["Yes", "No", "Dry-run"]
 ORDERS_DROPDOWNS = {
-    7: ["Matched", "Needs Review", "No Match", "Matched (manual)"],  # Match Status
+    7: ["Matched", "Needs Review", "No Match", "Matched (manual)", "Matched (new quote)"],  # Match Status
     12: YND,                                       # Ref Written
     13: YND,                                       # PDF Attached
     14: YND,                                       # Chatter Posted

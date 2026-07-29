@@ -9,6 +9,14 @@ note — it NEVER confirms the SO), and updates the row: Match Status becomes
 "Matched (manual)" and Odoo SO ID (col L) is filled — that SO ID is the
 idempotency marker, so resolved rows are never picked up again.
 
+Typing NEW (or NUEVA) in Manual SO # instead of an SO number asks Hermes to
+CREATE a draft quotation from the PO itself: the PDF is re-parsed, each line is
+matched to the catalog (unmatched lines get a product auto-created), every line
+is priced from the PO's own unit prices, and the same completion writes run on
+the new draft. Match Status becomes "Matched (new quote)". The draft is never
+confirmed or sent. An unknown customer leaves the row unresolved (fix the
+partner/alias in Odoo, it retries next run).
+
 Honors runtime.dry_run: in dry-run nothing is written to Odoo or the Orders row
 (so a later --live run still fires); intended actions go to the console and the
 Audit tab. Timer-friendly one-shot, same as intake.py.
@@ -25,7 +33,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.config import load_config  # noqa: E402
 from core.actions import ActionOutcome, annotate_odoo, _now  # noqa: E402
+from core.po_parser import parse_po  # noqa: E402
+from core.product_matcher import match_lines  # noqa: E402
+from core.quote_actions import po_lines, quote_from_po  # noqa: E402
 from connectors.gmail_client import GmailClient, GmailError  # noqa: E402
+from connectors.llm_client import LLMClient  # noqa: E402
 from connectors.odoo_client import OdooClient, OdooError  # noqa: E402
 from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 
@@ -33,6 +45,8 @@ from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 # ORDERS_HEADERS in scripts/setup_sheet.py.
 PO_NUM, STATUS, MANUAL_SO, SO_ID, GMAIL_MSG = 1, 7, 10, 11, 18
 RESOLVED_STATUS = "Matched (manual)"
+NEW_STATUS = "Matched (new quote)"
+NEW_SENTINELS = {"NEW", "NUEVA"}  # typed in Manual SO # to request a quote from the PO
 
 
 def _cell(row: list, idx: int) -> str:
@@ -68,12 +82,13 @@ def _fetch_pdf(gm: GmailClient, msg_id: str, po_number: str) -> tuple[str, bytes
     return "", b"", meta
 
 
-def run_once(gm, odoo, sheets, cfg, dry) -> int:
+def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
     tabs = cfg["sheets"]["tabs"]
     orders_tab, audit_tab = tabs["orders"], tabs["audit"]
     write = cfg.get("write", {})
     run_mode = "dry-run" if dry else "live"
     rows = sheets.read(f"{orders_tab}!A2:V")
+    products = None  # catalog pool, fetched once and only if a NEW row shows up
 
     applied = 0
     for i, r in enumerate(rows):
@@ -91,24 +106,69 @@ def run_once(gm, odoo, sheets, cfg, dry) -> int:
         def _audit(action, detail, result):
             audit_rows.append([_now(), po_number, action, detail, result, run_mode])
 
-        q = _resolve_so(odoo, manual_so)
-        if not q:
-            print(f"  row {rownum}: Manual SO '{manual_so}' not found (or ambiguous) in Odoo — skipped")
-            _audit("error", f"manual SO '{manual_so}' not found or ambiguous (row {rownum})", "error")
+        def _flush():
             for a in audit_rows:
                 sheets.append_row(audit_tab, a)
-            continue
 
-        filename, pdf_bytes, email_meta = ("", b"", {})
-        if msg_id:
-            try:
-                filename, pdf_bytes, email_meta = _fetch_pdf(gm, msg_id, po_number)
-            except Exception as exc:  # message gone/label moved — still do the other writes
-                _audit("error", f"could not re-fetch PDF from Gmail msg {msg_id}: {exc}", "error")
-        if not pdf_bytes:
-            print(f"  row {rownum}: no PDF recovered for PO {po_number or '?'} — annotating without attachment")
+        if manual_so.upper() in NEW_SENTINELS:
+            # --- create a NEW draft quote from the PO itself ---
+            status = NEW_STATUS
+            filename, pdf_bytes, email_meta = ("", b"", {})
+            if msg_id:
+                try:
+                    filename, pdf_bytes, email_meta = _fetch_pdf(gm, msg_id, po_number)
+                except Exception as exc:
+                    _audit("error", f"could not re-fetch PDF from Gmail msg {msg_id}: {exc}", "error")
+            if not pdf_bytes:
+                print(f"  row {rownum}: NEW quote requested but no PO PDF recoverable — skipped")
+                _audit("error", f"NEW quote for PO {po_number or '?'}: no PDF "
+                                f"(Gmail msg {msg_id or 'missing'})", "error")
+                _flush()
+                continue
 
-        out = ActionOutcome(dry_run=dry, status=RESOLVED_STATUS, so_id=q["id"], so_name=q["name"])
+            po = parse_po(pdf_bytes, llm, cfg.get("company", {}))
+            po["po_number"] = po_number or po.get("po_number") or ""  # sheet PO# is authoritative
+            lines = po_lines(po)
+            if not lines:
+                print(f"  row {rownum}: no line items extracted from PO {po_number or '?'} — skipped")
+                _audit("error", f"NEW quote for PO {po_number or '?'}: no line items extracted", "error")
+                _flush()
+                continue
+            if products is None:
+                products = odoo.all_products()
+            matches = match_lines(lines, products, cfg["rfq"]["match"])
+            qo = quote_from_po(odoo, cfg, po, matches, _audit, llm=llm, search=search, dry=dry)
+            if dry:
+                print(f"  row {rownum}: [SIM] PO {po_number or '?'} -> would create draft quote "
+                      f"({len(lines)} line(s) at PO prices)")
+                applied += 1
+                _flush()
+                continue
+            if not qo.order_id:  # customer not in Odoo — row stays unresolved, retries next run
+                print(f"  row {rownum}: {qo.notes[-1] if qo.notes else 'no draft created'}")
+                _flush()
+                continue
+            u = odoo.read_field("sale.order", qo.order_id, "user_id")
+            q = {"id": qo.order_id, "name": qo.order_name, "user_id": u, "invoice_status": ""}
+        else:
+            # --- link to an existing quotation the human picked ---
+            status = RESOLVED_STATUS
+            q = _resolve_so(odoo, manual_so)
+            if not q:
+                print(f"  row {rownum}: Manual SO '{manual_so}' not found (or ambiguous) in Odoo — skipped")
+                _audit("error", f"manual SO '{manual_so}' not found or ambiguous (row {rownum})", "error")
+                _flush()
+                continue
+            filename, pdf_bytes, email_meta = ("", b"", {})
+            if msg_id:
+                try:
+                    filename, pdf_bytes, email_meta = _fetch_pdf(gm, msg_id, po_number)
+                except Exception as exc:  # message gone/label moved — still do the other writes
+                    _audit("error", f"could not re-fetch PDF from Gmail msg {msg_id}: {exc}", "error")
+            if not pdf_bytes:
+                print(f"  row {rownum}: no PDF recovered for PO {po_number or '?'} — annotating without attachment")
+
+        out = ActionOutcome(dry_run=dry, status=status, so_id=q["id"], so_name=q["name"])
         annotate_odoo(odoo, write, q, po_number, pdf_bytes, filename,
                       "manual", email_meta, dry, out, _audit)
 
@@ -119,7 +179,7 @@ def run_once(gm, odoo, sheets, cfg, dry) -> int:
             salesperson = q["user_id"][1] if isinstance(q.get("user_id"), (list, tuple)) else ""
             invoice_status = q.get("invoice_status") or ""
             sheets.update_range(f"{orders_tab}!D{rownum}:E{rownum}", [[salesperson, q["name"]]])
-            sheets.update_range(f"{orders_tab}!H{rownum}:I{rownum}", [[RESOLVED_STATUS, "manual"]])
+            sheets.update_range(f"{orders_tab}!H{rownum}:I{rownum}", [[status, "manual"]])
             sheets.update_range(f"{orders_tab}!L{rownum}:R{rownum}", [[
                 q["id"], out.ref_written, out.pdf_attached, out.chatter_posted,
                 out.terms_updated, invoice_status, "Yes" if invoice_status == "invoiced" else "No",
@@ -129,8 +189,7 @@ def run_once(gm, odoo, sheets, cfg, dry) -> int:
                   f"ref={out.ref_written} pdf={out.pdf_attached} chatter={out.chatter_posted} "
                   f"terms={out.terms_updated}")
         applied += 1
-        for a in audit_rows:
-            sheets.append_row(audit_tab, a)
+        _flush()
 
     return applied
 
@@ -153,9 +212,16 @@ def main() -> int:
     except (GmailError, OdooError, SheetsError) as exc:
         print(f"FAILED (connect): {exc}")
         return 1
+    llm = LLMClient.from_config(cfg)  # needed only for NEW rows (PO re-parse)
+    try:  # web search is optional (product images) — never a hard dependency
+        from connectors.serper_client import SerperClient
+        from connectors.search_client import SearchClient
+        search = SerperClient.from_config(cfg) or SearchClient.from_config(cfg)
+    except ImportError:
+        search = None
 
     print(f"Manual resolver  Odoo db: {cfg['odoo']['db']}   mode: {'DRY-RUN' if dry else 'LIVE'}")
-    n = run_once(gm, odoo, sheets, cfg, dry)
+    n = run_once(gm, odoo, sheets, cfg, dry, llm=llm, search=search)
     print(f"  -> {n} row(s) {'simulated' if dry else 'resolved'}")
     return 0
 
