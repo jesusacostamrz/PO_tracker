@@ -129,6 +129,23 @@ def demo():
                          lambda *a: audits.append(a))
     assert out3.order_id is None and out3.status == "Needs Review"
 
+    # redo detection: NEW + cancelled/deleted linked SO unblocks; a live one doesn't
+    from scripts.apply_manual import _so_redoable
+
+    class SO(FakeOdoo):
+        state: str | None = "cancel"
+
+        def search_read(self, model, domain=None, fields=None, limit=None, order=None):
+            assert model == "sale.order"
+            return [{"state": self.state}] if self.state else []
+    so = SO()
+    assert _so_redoable(so, "3121")            # cancelled -> redo
+    so.state = "draft"
+    assert not _so_redoable(so, "3121")        # still standing -> blocked
+    so.state = None
+    assert _so_redoable(so, "999")             # deleted -> redo
+    assert not _so_redoable(so, "garbage")     # unparseable id -> stay safe, blocked
+
     print("test_manual_new: OK")
 
 

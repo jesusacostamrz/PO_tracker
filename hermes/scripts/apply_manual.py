@@ -60,6 +60,18 @@ def _cell(row: list, idx: int) -> str:
     return (row[idx] if len(row) > idx else "").strip()
 
 
+def _so_redoable(odoo: OdooClient, so_id: str) -> bool:
+    """True when the SO linked in col L no longer stands (deleted or cancelled).
+
+    Col L is hidden — a human can't clear it. Killing the wrong draft in Odoo
+    while leaving NEW/NUEVA in Manual SO # is their way of saying 'redo this'."""
+    try:
+        recs = odoo.search_read("sale.order", [["id", "=", int(so_id)]], ["state"], limit=1)
+    except (ValueError, TypeError):
+        return False
+    return not recs or recs[0]["state"] == "cancel"
+
+
 def _resolve_so(odoo: OdooClient, so_name: str) -> dict | None:
     """Find exactly one sale.order for the human-typed number; None if 0 or 2+."""
     fields = ["name", "user_id", "invoice_status", "state"]
@@ -101,10 +113,15 @@ def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
     for i, r in enumerate(rows):
         rownum = i + 2
         manual_so = _cell(r, MANUAL_SO)
-        # Idempotency keys on Odoo SO ID (col L), which only Hermes writes: an
-        # auto-matched or already-resolved row has it, a human-typed status doesn't.
-        if not manual_so or _cell(r, SO_ID):
-            continue  # nothing to resolve, or already linked to an SO
+        if not manual_so:
+            continue  # nothing to resolve
+        # Idempotency keys on Odoo SO ID (col L), which only Hermes writes.
+        # Exception: a NEW row whose linked SO was since deleted/cancelled in
+        # Odoo is an explicit redo request (see _so_redoable).
+        so_id = _cell(r, SO_ID)
+        is_new = manual_so.upper() in NEW_SENTINELS
+        if so_id and not (is_new and _so_redoable(odoo, so_id)):
+            continue  # already linked to a standing SO
 
         po_number = _cell(r, PO_NUM)
         msg_id = _cell(r, GMAIL_MSG)
@@ -117,9 +134,11 @@ def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
             for a in audit_rows:
                 sheets.append_row(audit_tab, a)
 
-        if manual_so.upper() in NEW_SENTINELS:
+        if is_new:
             # --- create a NEW draft quote from the PO itself ---
             status = NEW_STATUS
+            if so_id:
+                _audit("redo", f"prior draft (SO id {so_id}) deleted/cancelled in Odoo — recreating", "ok")
             filename, pdf_bytes, email_meta = ("", b"", {})
             if msg_id:
                 try:
