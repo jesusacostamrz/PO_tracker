@@ -73,6 +73,23 @@ def match_lines(lines: list[dict], products: list[dict], mcfg: dict) -> list[Lin
             out.append(LineMatch(line, status, prod, score, why))
             continue
 
+        # Some buyers put an internal code (cost center) in the part# column and the
+        # real part number at the start of the description — an exact catalog hit on
+        # a description token is near-exact evidence. Guards: >=5 chars and at least
+        # one digit (part numbers have digits; plain words like PIEZA/CABLE don't);
+        # two DIFFERENT catalog hits in one description (e.g. a cross-reference)
+        # -> ambiguous, fall through to fuzzy.
+        desc_hits: dict[int, dict] = {}
+        for tok in re.split(r"[\s,;:()\"']+", line.get("description") or ""):
+            t = norm_code(tok)
+            if len(t) >= 5 and any(c.isdigit() for c in t) and t in by_code:
+                desc_hits[by_code[t]["id"]] = by_code[t]
+        if len(desc_hits) == 1:
+            status, prod, score, why = _decide(next(iter(desc_hits.values())), 100.0,
+                                               "exact part-number match (in description)")
+            out.append(LineMatch(line, status, prod, score, why))
+            continue
+
         top2 = _best_two(line, products)
         if not top2 or top2[0][0] < threshold:
             best = top2[0][1] if top2 and top2[0][0] >= 60 else None

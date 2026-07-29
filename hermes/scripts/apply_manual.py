@@ -17,6 +17,12 @@ the new draft. Match Status becomes "Matched (new quote)". The draft is never
 confirmed or sent. An unknown customer leaves the row unresolved (fix the
 partner/alias in Odoo, it retries next run).
 
+Check & balance: the PO's unit prices are compared against what this customer
+was last quoted in Odoo. Any discrepancy (price moved, product never quoted to
+them, or a brand-new product) still creates the draft, but the row lands amber
+as "Price Review" with the details in Match Notes and a warning chatter note on
+the quote — a human confirms prices before the quote goes anywhere.
+
 Honors runtime.dry_run: in dry-run nothing is written to Odoo or the Orders row
 (so a later --live run still fires); intended actions go to the console and the
 Audit tab. Timer-friendly one-shot, same as intake.py.
@@ -46,6 +52,7 @@ from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 PO_NUM, STATUS, MANUAL_SO, SO_ID, GMAIL_MSG = 1, 7, 10, 11, 18
 RESOLVED_STATUS = "Matched (manual)"
 NEW_STATUS = "Matched (new quote)"
+PRICE_REVIEW_STATUS = "Price Review"  # quote created, but PO prices disagree with prior quotes
 NEW_SENTINELS = {"NEW", "NUEVA"}  # typed in Manual SO # to request a quote from the PO
 
 
@@ -150,6 +157,9 @@ def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
                 continue
             u = odoo.read_field("sale.order", qo.order_id, "user_id")
             q = {"id": qo.order_id, "name": qo.order_name, "user_id": u, "invoice_status": ""}
+            if qo.price_flags:  # quote exists, but a human must recheck prices first
+                status = PRICE_REVIEW_STATUS
+                print(f"  row {rownum}: PRICE REVIEW — " + "; ".join(qo.price_flags))
         else:
             # --- link to an existing quotation the human picked ---
             status = RESOLVED_STATUS
@@ -179,7 +189,11 @@ def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
             salesperson = q["user_id"][1] if isinstance(q.get("user_id"), (list, tuple)) else ""
             invoice_status = q.get("invoice_status") or ""
             sheets.update_range(f"{orders_tab}!D{rownum}:E{rownum}", [[salesperson, q["name"]]])
-            sheets.update_range(f"{orders_tab}!H{rownum}:I{rownum}", [[status, "manual"]])
+            if status == PRICE_REVIEW_STATUS:  # discrepancies go to Match Notes (col J)
+                sheets.update_range(f"{orders_tab}!H{rownum}:J{rownum}",
+                                    [[status, "manual", "; ".join(qo.price_flags)[:1000]]])
+            else:
+                sheets.update_range(f"{orders_tab}!H{rownum}:I{rownum}", [[status, "manual"]])
             sheets.update_range(f"{orders_tab}!L{rownum}:R{rownum}", [[
                 q["id"], out.ref_written, out.pdf_attached, out.chatter_posted,
                 out.terms_updated, invoice_status, "Yes" if invoice_status == "invoiced" else "No",

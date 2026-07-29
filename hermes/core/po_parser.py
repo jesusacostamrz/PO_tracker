@@ -79,7 +79,8 @@ Return ONLY a JSON object (use null where a field is absent):
   "ship_to": string,                  // delivery destination, condensed to one line
   "requested_delivery_date": "YYYY-MM-DD",
   "line_items": [
-    {{"customer_item_code": string, "description": string, "quantity": number,
+    {{"customer_item_code": string,     // the item's PART/MODEL NUMBER (e.g. "M22-KC10", "1201099") — NOT an internal buyer code
+      "description": string, "quantity": number,
       "uom": string, "unit_price": number, "amount": number}}
   ]
 }}
@@ -96,6 +97,11 @@ Rules:
 - supplier_quote_ref: only fill if the PO explicitly cites OUR quotation/cotización number; otherwise null. Never guess it.
 - buyer_contact: capture the full name if shown (e.g. first + last).
 - Extract every line item from the order table; never invent items.
+- customer_item_code: some buyers fill the Articulo/Item column with an INTERNAL code (a cost
+  center or account, often the SAME value repeated on every line, e.g. "9000514 MEJORAS
+  AUTOMATIZACION"). That is NOT the part number — in that case take the real part/model number,
+  which usually appears at the START of the description (e.g. '1201099 "BG/SH - soporte..."'
+  -> "1201099"). Use null when the line truly has no part number.
 - Output JSON only — no prose, no code fences."""
 
 

@@ -47,7 +47,8 @@ ORDERS_HIDDEN_COLS = [8, 11, 12, 13, 14, 15, 16, 18]
 YN = ["Yes", "No"]
 YND = ["Yes", "No", "Dry-run"]
 ORDERS_DROPDOWNS = {
-    7: ["Matched", "Needs Review", "No Match", "Matched (manual)", "Matched (new quote)"],  # Match Status
+    7: ["Matched", "Needs Review", "No Match", "Matched (manual)", "Matched (new quote)",
+        "Price Review"],  # Match Status ("Price Review": new quote created, PO prices need a human check)
     12: YND,                                       # Ref Written
     13: YND,                                       # PDF Attached
     14: YND,                                       # Chatter Posted
@@ -107,6 +108,7 @@ DASHBOARD_ROWS = [
     ["Matched", '=COUNTIF(Orders!H2:H,"Matched*")'],
     ["Needs Review", '=COUNTIF(Orders!H2:H,"Needs Review")'],
     ["No Match", '=COUNTIF(Orders!H2:H,"No Match")'],
+    ["Price review", '=COUNTIF(Orders!H2:H,"Price Review")'],
     ["", ""],
     ["Refs written to Odoo", '=COUNTIF(Orders!M2:M,"Yes")'],
     ["PDFs attached to Odoo", '=COUNTIF(Orders!N2:N,"Yes")'],
@@ -166,6 +168,7 @@ def _style_orders(sc: SheetsClient, sid: int, n_cols: int) -> None:
     sc.add_conditional_rule(sid, n_cols, '=REGEXMATCH($H2,"^Matched")', TINT_MATCHED)  # green
     sc.add_conditional_rule(sid, n_cols, '=$H2="No Match"', TINT_NOMATCH)              # red
     sc.add_conditional_rule(sid, n_cols, '=$H2="Needs Review"', TINT_REVIEW)           # amber
+    sc.add_conditional_rule(sid, n_cols, '=$H2="Price Review"', TINT_REVIEW)           # amber
     sc.set_number_format(sid, 5, "#,##0.00")   # PO Amount (untaxed)
     sc.hide_columns(sid, list(range(n_cols)), hidden=False)  # reset so a moved col un-hides
     sc.hide_columns(sid, ORDERS_HIDDEN_COLS)

@@ -133,6 +133,7 @@ class QuoteOutcome:
     queued: int = 0
     skipped: bool = False
     notes: list[str] = field(default_factory=list)
+    price_flags: list[str] = field(default_factory=list)  # PO-vs-quoted discrepancies (PO flow)
 
     def log(self, msg: str) -> None:
         self.notes.append(msg)
@@ -427,6 +428,53 @@ def _po_price(m: LineMatch) -> float:
         return 0.0
 
 
+def _last_quoted_prices(odoo: OdooClient, partner_id: int,
+                        product_ids: set[int]) -> dict[int, tuple[float, str]]:
+    """{product id -> (unit price, order name)} from the MOST RECENT sale.order
+    line for this customer. ponytail: newest by line id, one bulk read; per-order
+    date ordering can come later if edits ever make id-order wrong."""
+    if not product_ids:
+        return {}
+    rows = odoo.search_read(
+        "sale.order.line",
+        [["order_partner_id", "=", partner_id], ["product_id", "in", list(product_ids)]],
+        ["product_id", "price_unit", "order_id"], order="id desc", limit=500)
+    out: dict[int, tuple[float, str]] = {}
+    for r in rows:
+        pid = r["product_id"][0] if isinstance(r["product_id"], (list, tuple)) else r["product_id"]
+        if pid not in out:
+            oname = r["order_id"][1] if isinstance(r["order_id"], (list, tuple)) else ""
+            out[pid] = (r["price_unit"] or 0.0, oname)
+    return out
+
+
+def check_po_prices(odoo: OdooClient, partner_id: int, matches: list[LineMatch],
+                    created_ids: set[int]) -> list[str]:
+    """Check & balance: the PO's unit prices vs what this customer was last
+    quoted in Odoo. Returns one flag string per discrepancy — a price that moved,
+    a product never quoted to this customer, or a brand-new product."""
+    prior = _last_quoted_prices(odoo, partner_id,
+                                {m.product["id"] for m in matches
+                                 if m.product and m.product["id"] not in created_ids})
+    flags: list[str] = []
+    for m in matches:
+        pid = (m.product or {}).get("id")
+        if not pid:
+            continue
+        label = m.product.get("name") or m.line.get("part_number") or str(pid)
+        po_p = _po_price(m)
+        if pid in created_ids:
+            flags.append(f"{label}: new product — no prior quoted price")
+        elif pid not in prior:
+            flags.append(f"{label}: never quoted to this customer")
+        else:
+            quoted, oname = prior[pid]
+            # ponytail: 0.5% tolerance for rounding; make it config if it ever needs tuning
+            if abs(quoted - po_p) > max(0.01, 0.005 * quoted):
+                flags.append(f"{label}: PO price {po_p:g} vs quoted {quoted:g} ({oname or 'prior quote'})")
+    return flags
+
+
 def quote_from_po(odoo: OdooClient, cfg: dict, po: dict, matches: list[LineMatch],
                   audit, llm=None, search=None, dry: bool = False) -> QuoteOutcome:
     """Create a DRAFT quotation from a customer PO's own lines.
@@ -467,12 +515,24 @@ def quote_from_po(odoo: OdooClient, cfg: dict, po: dict, matches: list[LineMatch
         if m.product["id"] in created_ids and (n := _line_name(m)):
             l["name"] = n
         lines.append(l)
+    # Check & balance BEFORE creating (the draft's own lines must not count as
+    # "prior quotes"): PO prices vs what this customer was last quoted.
+    out.price_flags = check_po_prices(odoo, partner["id"], matches, created_ids)
+
     out.order_id = odoo.create_draft_quote(partner["id"], lines,
                                            client_ref=po.get("po_number") or "")
     out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""
     audit("odoo_create_quote",
           f"created draft {out.order_name} for {partner['name']} from PO "
           f"({len(lines)} line(s) at PO prices, {len(created_products)} product(s) auto-created)", "ok")
+    if out.price_flags:
+        out.status = "Price Review"
+        odoo.post_chatter(out.order_id,
+                          "Hermes: price check vs this customer's previous quotes found "
+                          "discrepancies — review before confirming:\n- "
+                          + "\n- ".join(out.price_flags))
+        audit("price_review", f"{len(out.price_flags)} line(s) flagged: "
+                              + "; ".join(out.price_flags)[:300], "ok")
 
     if created_products and llm is not None and pdef.get("unspsc", True):
         try:
