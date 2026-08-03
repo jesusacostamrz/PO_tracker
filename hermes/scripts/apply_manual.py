@@ -32,6 +32,7 @@ Usage:  python scripts/apply_manual.py [--live] [--odoo-db NAME]
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -73,11 +74,18 @@ def _so_redoable(odoo: OdooClient, so_id: str) -> bool:
 
 
 def _resolve_so(odoo: OdooClient, so_name: str) -> dict | None:
-    """Find exactly one sale.order for the human-typed number; None if 0 or 2+."""
+    """Find exactly one sale.order for the human-typed number; None if 0 or 2+.
+
+    Tolerates hand-typed short forms (e.g. 'S2996' for 'S02996'): falls back to
+    matching the digits with leading zeros stripped, still requiring a unique hit."""
     fields = ["name", "user_id", "invoice_status", "state"]
     recs = odoo.search_read("sale.order", [["name", "=", so_name]], fields, limit=2)
     if not recs:
         recs = odoo.search_read("sale.order", [["name", "ilike", so_name]], fields, limit=2)
+    if not recs:
+        digits = re.sub(r"\D", "", so_name).lstrip("0")
+        if digits:
+            recs = odoo.search_read("sale.order", [["name", "ilike", digits]], fields, limit=2)
     return recs[0] if len(recs) == 1 else None
 
 
@@ -186,6 +194,10 @@ def run_once(gm, odoo, sheets, cfg, dry, llm=None, search=None) -> int:
             if not q:
                 print(f"  row {rownum}: Manual SO '{manual_so}' not found (or ambiguous) in Odoo — skipped")
                 _audit("error", f"manual SO '{manual_so}' not found or ambiguous (row {rownum})", "error")
+                if not dry:  # surface the problem on the row itself (Match Notes, col J)
+                    sheets.update_range(f"{orders_tab}!J{rownum}",
+                                        [[f"Manual SO '{manual_so}' not found or ambiguous in Odoo — "
+                                          "check the number"]])
                 _flush()
                 continue
             filename, pdf_bytes, email_meta = ("", b"", {})
