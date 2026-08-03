@@ -84,6 +84,14 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
                      + (" (skipped: already tracked)" if out.skipped else ""))
 
 
+# Transient network failures are retried on later polls instead of being labeled
+# NeedsReview (which would permanently exclude the message from the poll query).
+# ponytail: in-memory counter — resets on restart, which just re-grants 3 tries.
+_TRANSIENT = (TimeoutError, ConnectionError)
+_RETRY_CAP = 3
+_transient_fails: dict[str, int] = {}
+
+
 def run_once(gm, odoo, sheets, cfg, llm, dry, max_msgs, mark_read, search=None) -> list[str]:
     lines_out: list[str] = []
     msgs = gm.search(cfg["rfq"]["poll_query"], max_results=max_msgs)
@@ -94,7 +102,14 @@ def run_once(gm, odoo, sheets, cfg, llm, dry, max_msgs, mark_read, search=None) 
         try:
             _process_message(gm, odoo, sheets, cfg, llm, products, m["id"], dry, mark_read, lines_out,
                              search=search)
+            _transient_fails.pop(m["id"], None)
         except Exception as exc:  # one bad message must not kill the batch
+            if isinstance(exc, _TRANSIENT):
+                n = _transient_fails[m["id"]] = _transient_fails.get(m["id"], 0) + 1
+                if n < _RETRY_CAP:
+                    lines_out.append(f"  [RETRY {n}/{_RETRY_CAP}] msg {m['id']} — "
+                                     f"{type(exc).__name__}: {exc} (will retry next poll)")
+                    continue
             if not dry:
                 try:
                     gm.apply_label(m["id"], cfg["rfq"]["labels"]["needs_review"], mark_read=mark_read)
