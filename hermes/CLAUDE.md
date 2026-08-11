@@ -32,7 +32,7 @@ python scripts/apply_manual.py [--live] [--odoo-db NAME]   # apply Odoo writes f
                                                            # completes the same workflow on it -> "Matched (new quote)"
 
 # Quotes pipeline (RFQ -> draft Odoo quotation). Same dry-run defaults.
-python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt> [--live]   # local test bench
+python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt|.pdf> [--live]   # local test bench
 python scripts/intake_rfq.py [--live] [--max N] [--watch SECONDS]        # Gmail batch (subject contains "RFQ")
 python scripts/apply_quotes.py [--live]              # apply human pricing from the Pricing Queue tab
 python scripts/import_pricelist.py --brand <key> <lista.xlsx> [--live]   # distributor price list -> Odoo catalog

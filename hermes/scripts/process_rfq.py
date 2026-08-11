@@ -1,4 +1,4 @@
-"""Process one local RFQ file (xlsx/csv/png/jpg/txt) -> parse, match, act.
+"""Process one local RFQ file (xlsx/csv/png/jpg/txt/pdf) -> parse, match, act.
 
 DEFAULTS TO DRY-RUN (runtime.dry_run). --live creates the draft quotation and
 writes Tracker rows. No Gmail involved — this is the test bench; idempotency is
@@ -23,7 +23,7 @@ from connectors.odoo_client import OdooClient, OdooError    # noqa: E402
 from connectors.sheets_client import SheetsClient, SheetsError  # noqa: E402
 
 KINDS = {".xlsx": "xlsx", ".xlsm": "xlsx", ".png": "image", ".jpg": "image",
-         ".jpeg": "image", ".txt": "text", ".csv": "text"}
+         ".jpeg": "image", ".txt": "text", ".csv": "text", ".pdf": "pdf"}
 
 
 def main() -> int:

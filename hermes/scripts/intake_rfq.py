@@ -29,12 +29,13 @@ from connectors.sheets_client import SheetsClient, SheetsError   # noqa: E402
 XLSX_EXTS = (".xlsx", ".xlsm")
 CSV_EXTS = (".csv",)
 IMG_EXTS = (".png", ".jpg", ".jpeg")
+PDF_EXTS = (".pdf",)
 
 
 def _sources_from_message(gm: GmailClient, full: dict) -> list[tuple[str, str, bytes | str]]:
-    """Collect RFQ content: spreadsheet/CSV attachments first, then images, then
-    the email body — only when there is no attachment at all (an attached list is
-    authoritative; body prose would otherwise shadow the vision path)."""
+    """Collect RFQ content: spreadsheet/CSV attachments, images, and ALWAYS the
+    email body — a forwarded/inline-image RFQ carries the customer identity and
+    any instructions only in the body (parse_rfq sends text + images together)."""
     sources: list[tuple[str, str, bytes | str]] = []
     for fn, data in gm.attachments_by_ext(full, XLSX_EXTS):
         sources.append(("xlsx", fn, data))
@@ -42,10 +43,11 @@ def _sources_from_message(gm: GmailClient, full: dict) -> list[tuple[str, str, b
         sources.append(("text", fn, data.decode("utf-8", "replace")))
     for fn, data in gm.attachments_by_ext(full, IMG_EXTS):
         sources.append(("image", fn, data))
-    if not sources:
-        body = gm.body_text(full)
-        if body:
-            sources.append(("text", "email-body", body))
+    for fn, data in gm.attachments_by_ext(full, PDF_EXTS):
+        sources.append(("pdf", fn, data))
+    body = gm.body_text(full)
+    if body:
+        sources.append(("text", "email-body", body))
     return sources
 
 

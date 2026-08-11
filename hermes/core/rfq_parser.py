@@ -1,7 +1,7 @@
 """Parse a customer RFQ (component list) into structured line items via the LLM.
 
-Inputs arrive in mixed formats — Excel/CSV attachments, images/photos, or a table
-pasted in the email body. Everything is normalized to text (or image data-URLs)
+Inputs arrive in mixed formats — Excel/CSV/PDF attachments, images/photos, or a
+table pasted in the email body. Everything is normalized to text (or image data-URLs)
 and pushed through ONE extraction prompt, so all formats yield the same JSON.
 """
 from __future__ import annotations
@@ -40,22 +40,41 @@ Return ONLY a JSON object (null where absent):
 {{
   "customer_name": string,   // the requesting company, if identifiable; else null
   "rfq_ref": string,         // the customer's RFQ/requisition number, if any; else null
+  "margin_pct": number,      // profit margin % EXPLICITLY instructed in the email body (e.g. "add 40%"); else null
   "line_items": [
     {{"part_number": string,  // manufacturer part number / catalog code; null if only a description
       "description": string,  // what the item is, as written
       "manufacturer": string, // brand/maker (e.g. NITRA, SMC, BIMBA) — from a brand column OR embedded in the description; else null
-      "quantity": number}}    // requested quantity; default 1 if truly absent
+      "quantity": number,     // requested quantity; default 1 if truly absent
+      "unit_cost": number}}   // OUR unit cost — ONLY in supplier-quote mode (rule below); else null
   ]
 }}
 
 Rules:
 - Extract EVERY requested item; never invent items; never drop rows.
+- The EMAIL BODY may carry explicit instructions from OUR OWN salesperson. Those instructions
+  OVERRIDE anything inferred from the attached document: "quote for <X>" / "cotización para <X>"
+  names the customer (customer_name = X, resolve to the full company name if obvious); a stated
+  profit margin ("increase 40%", "agrega 30% de margen") goes to margin_pct.
+- SUPPLIER-QUOTE MODE: sometimes the attachment is a quotation FROM OUR SUPPLIER (we are the
+  buyer on it) that the body tells us to use as the pricing basis for a customer quote. Then:
+  customer_name comes from the body instruction (NEVER the supplier company), each line's unit
+  price on the document is OUR COST -> unit_cost, and rfq_ref is the supplier's quote number.
 - RFQs usually arrive FORWARDED by our own salespeople — ignore the forwarder. The customer is the
   ORIGINAL sender in the quoted forwarded header (its "From:"/"De:" line); take their company name,
   or infer it from their email domain (e.g. jperez@acme-corp.com -> Acme Corp).
-- part_number is a catalog/manufacturer code (e.g. "6204-2RS", "1SVR405613R3100") — not a line number.
+- part_number is the manufacturer's MODEL/catalog code (e.g. "6204-2RS", "FRN15G15-4T", "FX3U-128M",
+  "LC1D09"). It is often EMBEDDED mid-description ("VARIADOR FUJI ELECTRIC FRN15G15-4T 3 HP" ->
+  part_number "FRN15G15-4T") — pull it out; the full text stays in description.
+- NEVER use as part_number: line numbers, or regulatory/certification codes printed on labels
+  (KCC-..., MSIP-..., UL, CE, NOM ...) — those are not catalog codes; leave them out entirely.
+- Customer tables often ALSO carry the customer's own internal item/account/stock code (a column like
+  "No. de parte ABC", "Código", "Item #", often sequential or same-prefixed for every row). That is NOT
+  the part_number. Prefer the manufacturer/catalog code; if only the internal code exists, put it at the
+  start of the description (e.g. "[cód. cliente 123456] ...") and set part_number null.
 - Numbers: dot decimal, no thousands separators; quantity must be a number.
-- Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer typed.
+- Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer
+  typed (unit_cost in supplier-quote mode is the one exception).
 - Output JSON only — no prose, no code fences."""
 
 
@@ -66,10 +85,11 @@ def _img_data_url(img_bytes: bytes, filename: str) -> str:
 
 
 def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -> dict:
-    """sources: [(kind, filename, payload)] with kind in {'xlsx','image','text'}.
+    """sources: [(kind, filename, payload)] with kind in {'xlsx','image','text','pdf'}.
 
-    Text-ish sources are concatenated into one prompt; images go to the vision
-    model. If both exist, text wins (cheaper, usually the authoritative list).
+    Text-ish sources are concatenated into one prompt. Any image routes the whole
+    thing through the vision model, text included — the body often carries the
+    customer identity/instructions while the image shows the items.
     """
     system = _system_prompt(company)
     texts: list[str] = []
@@ -81,26 +101,48 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
             texts.append(f"--- EMAIL BODY ---\n{payload}")
         elif kind == "image":
             image_urls.append(_img_data_url(payload, filename))
+        elif kind == "pdf":
+            # reuse the PO pipeline's PDF machinery: text PDFs as text (cheap),
+            # scanned PDFs rendered to images for the vision model
+            import core.po_parser as po_parser
+            txt = po_parser.extract_text(payload)
+            if len(txt) >= po_parser._TEXT_MIN_CHARS:
+                texts.append(f"--- ATTACHMENT {filename} ---\n{txt}")
+            else:
+                image_urls.extend(po_parser.render_pages_as_data_urls(payload))
 
-    if texts:
+    if image_urls:
+        user_text = "Extract the RFQ from the attached image(s)."
+        if texts:
+            blob = "\n\n".join(texts)[:_MAX_TEXT_CHARS]
+            user_text = ("Extract the RFQ from the text below AND the attached image(s) together. "
+                         "The text may hold the customer identity, instructions, and/or items; "
+                         "the image(s) may show the items themselves. "
+                         "List each requested item once, even if it appears in both.\n\n" + blob)
+        result = llm.vision_json(system=system, user_text=user_text,
+                                 image_data_urls=image_urls[:4], max_tokens=8000)
+        result["_source"] = "vision+text" if texts else "vision"
+    elif texts:
         blob = "\n\n".join(texts)[:_MAX_TEXT_CHARS]
         result = llm.chat_json(system=system, user="RFQ content:\n\n" + blob, max_tokens=8000)
         result["_source"] = "text"
-    elif image_urls:
-        result = llm.vision_json(system=system, user_text="Extract the RFQ from the attached image(s).",
-                                 image_data_urls=image_urls[:4], max_tokens=8000)
-        result["_source"] = "vision"
     else:
         result = {"customer_name": None, "rfq_ref": None, "line_items": [], "_source": "empty"}
 
     result["line_items"] = [li for li in (result.get("line_items") or []) if isinstance(li, dict)]
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    result["margin_pct"] = _f(result.get("margin_pct"))
     # normalize lines defensively — downstream indexes these keys
     for li in result["line_items"]:
         li["part_number"] = (li.get("part_number") or None)
         li["description"] = str(li.get("description") or "")
         li["manufacturer"] = str(li.get("manufacturer") or "")
-        try:
-            li["quantity"] = float(li.get("quantity") or 1)
-        except (TypeError, ValueError):
-            li["quantity"] = 1.0
+        li["quantity"] = _f(li.get("quantity")) or 1.0
+        li["unit_cost"] = _f(li.get("unit_cost"))
     return result

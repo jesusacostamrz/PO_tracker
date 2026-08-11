@@ -159,6 +159,16 @@ def _find_partner(odoo: OdooClient, name: str, threshold: int,
     return best if best and best_score >= threshold else None
 
 
+def _cost_sale_price(m: LineMatch, margin_pct, default_pct) -> float | None:
+    """Supplier-quote mode: the RFQ email attached OUR SUPPLIER's quote and the
+    body instructed a profit margin — sale price = our cost * (1 + margin)."""
+    c = m.line.get("unit_cost")
+    if c is None:
+        return None
+    pct = default_pct if margin_pct is None else margin_pct
+    return round(c * (1 + pct / 100.0), 2)
+
+
 def _trusted(m: LineMatch) -> bool:
     """Only a TRUSTED match (exact part-number, or unambiguous fuzzy >= threshold)
     may reuse an existing product — the matcher also attaches weak below-threshold/
@@ -278,10 +288,17 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             sheets.append_row(audit_tab, a)
         return out
 
+    def sale_of(m):
+        return _cost_sale_price(m, rfq.get("margin_pct"),
+                                cfg.get("pricebook", {}).get("default_markup_pct", 25))
+
     auto = [m for m in matches if m.status == "matched"]
-    queue = [m for m in matches if m.status == "queue"]
+    # a queue-status line WITH a supplier cost is priceable (cost*margin) — it goes
+    # straight onto the draft instead of the Pricing Queue
+    queue = [m for m in matches if m.status == "queue" and sale_of(m) is None]
+    costed = [m for m in matches if m.status == "queue" and sale_of(m) is not None]
     out = QuoteOutcome(dry_run=dry, status="Dry-run" if dry else "Draft Created",
-                       auto_priced=len(auto), queued=len(queue))
+                       auto_priced=len(auto) + len(costed), queued=len(queue))
 
     # --- idempotency ---
     existing = _find_existing(sheets, quotes_tab, gmail_msg_id)
@@ -303,31 +320,38 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         out.status = "Needs Review"
         out.log(f"Customer '{customer or '?'}' not found in Odoo — no draft created.")
         _audit("needs_review", f"no Odoo partner for '{customer}' "
-                               f"({len(auto)} auto, {len(queue)} unpriced line(s) on hold)", "ok")
+                               f"({out.auto_priced} auto, {out.queued} unpriced line(s) on hold)", "ok")
     else:
-        auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"]}
+        # an explicit cost+margin instruction overrides the catalog price
+        auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
+                       **({"price_unit": p} if (p := sale_of(m)) is not None else {})}
                      for m in auto]  # no price_unit: Odoo prices from the pricelist
         if dry:
             _audit("odoo_create_quote",
                    f"would create draft quote for {partner['name']}: {len(auto_lines)} auto line(s), "
-                   f"{len(queue)} queued", "dry-run")
+                   f"{len(costed)} cost+margin, {len(queue)} queued", "dry-run")
         else:
             # Every RFQ line lands on the draft now: trusted matches reuse their
-            # product, the rest get one auto-created at price 0 (see _trusted /
-            # _create_missing_products).
+            # product, the rest get one auto-created (see _trusted /
+            # _create_missing_products) at cost*margin when known, else price 0.
             pdef = cfg["rfq"].get("product_defaults") or {}
-            created_products, created_ids = _create_missing_products(odoo, cfg, queue, _audit)
+            created_products, created_ids = _create_missing_products(
+                odoo, cfg, queue + costed, _audit, price_of=lambda m: sale_of(m) or 0.0)
 
+            costed_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
+                            "price_unit": sale_of(m),
+                            **({"name": n} if (n := _line_name(m)) else {})} for m in costed]
             queue_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                            "price_unit": 0.0,
                            **({"name": n} if (n := _line_name(m)) else {})} for m in queue]
-            lines = auto_lines + queue_lines
+            lines = auto_lines + costed_lines + queue_lines
             out.order_id = odoo.create_draft_quote(partner["id"], lines, client_ref=rfq_ref)
             out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""
             out.status = "Pending Pricing" if queue else "Draft Created"
             _audit("odoo_create_quote",
                    f"created draft {out.order_name} for {partner['name']} "
-                   f"({len(auto_lines)} auto, {len(queue_lines)} at price 0, "
+                   f"({len(auto_lines)} auto, {len(costed_lines)} cost+margin, "
+                   f"{len(queue_lines)} at price 0, "
                    f"{len(created_products)} product(s) auto-created)", "ok")
 
             # UNSPSC classification for new products (best-effort, one LLM call)
@@ -341,7 +365,7 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             # Product image candidates (attached AFTER the pricing pass below, so
             # a price-research source page can double as the image source).
             if search is not None:
-                img_cand.update(_image_candidates(odoo, auto + queue, created_ids))
+                img_cand.update(_image_candidates(odoo, auto + costed + queue, created_ids))
 
     # --- Pricing Queue rows (LIVE only; dry-run just audits intent) ---
     if queue and not dry and partner:
@@ -353,7 +377,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             web_price = web_currency = web_source = ""
             if research_price and search is not None and llm is not None:
                 try:
-                    offer = research_price(m.line, llm, search)
+                    offer = research_price(m.line, llm, search,
+                                           preferred_sites=cfg["rfq"].get("preferred_supplier_sites") or ())
                 except Exception as exc:  # best-effort: never block the queue row
                     offer = None
                     _audit("web_pricing", f"{m.line.get('part_number') or m.line.get('description')}: "
