@@ -23,7 +23,7 @@ Return ONLY a JSON object:
 {"price": number|null, "currency": "MXN"|"USD"|..., "vendor": string, "url": string, "note": string}"""
 
 
-def research_price(line: dict, llm, search) -> dict | None:
+def research_price(line: dict, llm, search, preferred_sites: tuple | list = ()) -> dict | None:
     if search is None:
         return None
     part = (line.get("part_number") or "").strip()
@@ -47,7 +47,9 @@ def research_price(line: dict, llm, search) -> dict | None:
             # as "7030-DXP-00MC"), so retry accepting the prefix-stripped form —
             # the extractor's exact-part rule still blocks a variant PRICE, so
             # this can only add reference links/images, never bad prices.
-            queries = [part or desc]
+            # 0) preferred supplier catalogs first (config rfq.preferred_supplier_sites)
+            queries = [f"site:{s} {part or desc}" for s in preferred_sites]
+            queries.append(part or desc)
             if part and mfr:
                 queries.append(f"{part} {mfr}")
             keys = [part] if part else [None]

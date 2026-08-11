@@ -229,6 +229,49 @@ class OdooClient:
             self.execute("product.supplierinfo", "create",
                          {"product_tmpl_id": tmpl_id, "partner_id": partner_id, "price": price})
 
+    # ---- purchasing (draft RFQs only — NEVER confirms or sends one) ----
+    def product_tmpl_map(self, product_ids: list[int]) -> dict[int, int]:
+        """{product.product id -> product.template id}."""
+        if not product_ids:
+            return {}
+        recs = self.execute("product.product", "read", list(product_ids), ["product_tmpl_id"])
+        out = {}
+        for r in recs:
+            v = r["product_tmpl_id"]
+            out[r["id"]] = v[0] if isinstance(v, (list, tuple)) else v
+        return out
+
+    def supplierinfo_by_tmpl(self, tmpl_ids) -> dict[int, dict]:
+        """{template id -> its top-priority vendor pricelist row} (lowest sequence wins,
+        matching the vendor Odoo itself would pick)."""
+        if not tmpl_ids:
+            return {}
+        rows = self.search_read(
+            "product.supplierinfo", [["product_tmpl_id", "in", list(tmpl_ids)]],
+            ["product_tmpl_id", "partner_id", "price", "min_qty", "sequence"],
+            order="sequence, id",
+        )
+        out: dict[int, dict] = {}
+        for r in rows:
+            t = r["product_tmpl_id"]
+            t = t[0] if isinstance(t, (list, tuple)) else t
+            out.setdefault(t, r)
+        return out
+
+    def purchase_orders_by_origin(self, origin: str) -> list[dict]:
+        return self.search_read("purchase.order", [["origin", "=", origin]],
+                                ["name", "partner_id", "state"])
+
+    def create_draft_rfq(self, partner_id: int, origin: str, lines: list[dict]) -> int:
+        """Create a DRAFT purchase.order (an Odoo 'Request for Quotation').
+        ``origin`` links it to the customer SO as the Source Document.
+        Never confirms it and never sends it to the vendor."""
+        return self.execute("purchase.order", "create", {
+            "partner_id": partner_id,
+            "origin": origin,
+            "order_line": [(0, 0, l) for l in lines],
+        })
+
     # ---- factory ----
     @classmethod
     def from_config(cls, cfg: dict) -> "OdooClient":

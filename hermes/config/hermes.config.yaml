@@ -24,6 +24,7 @@ odoo:
 sheets:
   spreadsheet_id: ${SHEETS_SPREADSHEET_ID}                # PO Tracker workbook
   quotes_spreadsheet_id: ${SHEETS_QUOTES_SPREADSHEET_ID}  # separate Quotes workbook (Quotes + Pricing Queue + its own Audit)
+  inventory_spreadsheet_id: ${SHEETS_INVENTORY_SPREADSHEET_ID}  # human-kept stock workbook (read-only for Hermes)
   service_account_path: ./.secrets/google_service_account.json
   tabs:
     orders: Orders
@@ -32,6 +33,7 @@ sheets:
     audit: Audit
     quotes: Quotes
     pricing_queue: Pricing Queue
+    inventory: Actualizacion
 
 rfq:
   # Team convention: forward RFQ emails with "RFQ" in the subject.
@@ -47,6 +49,10 @@ rfq:
   # email-domain name differs from their Odoo legal name.
   customer_aliases:
     abc aluminum: Aluminio de Baja California
+    abc: Aluminio de Baja California
+  # Distributor catalogs searched FIRST for web price research (site: queries).
+  preferred_supplier_sites:
+    - idsupply.com.mx
   # Applied to every product Hermes creates (accounts looked up by code; UNSPSC
   # proposed by the LLM and set only when the code exists in Odoo's catalog).
   product_defaults:

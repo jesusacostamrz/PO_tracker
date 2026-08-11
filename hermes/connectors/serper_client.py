@@ -24,6 +24,13 @@ def norm_token(s: str) -> str:
 _SEARCH_URL = "https://google.serper.dev/search"
 _IMAGES_URL = "https://google.serper.dev/images"
 
+# Social/marketplace-group pages are never a trustworthy price or image source.
+_BLOCKED_DOMAINS = ("facebook.com",)
+
+
+def _blocked(url: str) -> bool:
+    return any(d in (url or "") for d in _BLOCKED_DOMAINS)
+
 
 @dataclass
 class SerperClient:
@@ -64,6 +71,8 @@ class SerperClient:
         sources: list[str] = []
         for r in data.get("organic", []) or []:
             link = r.get("link") or ""
+            if _blocked(link):
+                continue
             price = r.get("price") or (r.get("attributes") or {}).get("price") or ""
             if key and key not in norm_token(f"{r.get('title', '')} {r.get('snippet', '')} {link}"):
                 continue
@@ -86,4 +95,5 @@ class SerperClient:
             print(f"WARN serper_client: {e}")
             return []
         return [{"url": i["imageUrl"], "title": i.get("title", ""), "link": i.get("link", "")}
-                for i in (data.get("images") or [])[:limit] if i.get("imageUrl")]
+                for i in (data.get("images") or [])[:limit]
+                if i.get("imageUrl") and not _blocked(i.get("link")) and not _blocked(i["imageUrl"])]
