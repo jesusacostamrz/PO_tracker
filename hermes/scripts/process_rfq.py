@@ -66,7 +66,8 @@ def main() -> int:
         got = (m.product or {}).get("name", "-")
         print(f"  [{tag}] {want!r:45} -> {got[:45]!r}  ({m.score:.0f}) {m.reason}")
 
-    out = apply_rfq(odoo, sheets, cfg, rfq, matches, dry_run=dry)
+    out = apply_rfq(odoo, sheets, cfg, rfq, matches, dry_run=dry,
+                    attachments=[(p.name, payload)] if kind == "pdf" else None)
     print(f"  -> status={out.status}  quote={out.order_name or '-'}  "
           f"auto={out.auto_priced}  queued={out.queued}")
     for n in out.notes:

@@ -72,8 +72,9 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
         return
 
     matches = match_lines(rfq["line_items"], products, cfg["rfq"]["match"])
+    pdfs = [(fn, data) for kind, fn, data in sources if kind == "pdf"]
     out = apply_rfq(odoo, sheets, cfg, rfq, matches, gmail_msg_id=msg_id, dry_run=dry,
-                    search=search, llm=llm)
+                    search=search, llm=llm, attachments=pdfs)
 
     # skipped = already tracked by a prior live run -> it was handled; label Processed.
     clean = out.skipped or (out.queued == 0 and out.status in ("Draft Created", "Dry-run"))

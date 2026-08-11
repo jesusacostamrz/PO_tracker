@@ -297,7 +297,8 @@ def _find_existing(sheets: SheetsClient, tab: str, msg_id: str):
 
 def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
               gmail_msg_id: str = "", dry_run: bool | None = None,
-              search=None, llm=None) -> QuoteOutcome:
+              search=None, llm=None,
+              attachments: list[tuple[str, bytes]] | None = None) -> QuoteOutcome:
     dry = cfg.get("runtime", {}).get("dry_run", True) if dry_run is None else dry_run
     tabs = cfg["sheets"]["tabs"]
     quotes_tab, pq_tab, audit_tab = tabs["quotes"], tabs["pricing_queue"], tabs["audit"]
@@ -395,6 +396,15 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                    f"({len(auto_lines)} auto, {len(costed_lines)} cost+margin, "
                    f"{len(queue_lines)} at price 0, "
                    f"{len(created_products)} product(s) auto-created)", "ok")
+
+            # source document(s) (e.g. the supplier's quote PDF) onto the draft,
+            # so they're at hand when the quote is confirmed — best-effort
+            for fn, data in (attachments or []):
+                try:
+                    odoo.attach_pdf(out.order_id, fn, data)
+                    _audit("attach_pdf", f"attached {fn} to {out.order_name}", "ok")
+                except Exception as exc:
+                    _audit("attach_pdf", f"{fn}: {type(exc).__name__}: {exc}", "error")
 
             # UNSPSC classification for new products (best-effort, one LLM call)
             if created_products and llm is not None and pdef.get("unspsc", True):
