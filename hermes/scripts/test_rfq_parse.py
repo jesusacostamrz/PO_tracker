@@ -47,19 +47,29 @@ print("OK pdf routing")
 # supplier-quote mode: margin_pct + unit_cost normalized; sale = cost * (1 + margin)
 class _CostLLM:
     def chat_json(self, **kw):
-        return {"customer_name": "ABC", "margin_pct": "40",
+        return {"customer_name": "ABC", "margin_pct": "40", "currency": "mxn",
                 "line_items": [{"description": "valvula", "quantity": 2, "unit_cost": "118.50"},
                                {"description": "cable", "quantity": 1}]}
 r = parse_rfq([("text", "email-body", "quote for ABC +40%")], _CostLLM(), {})
 assert r["margin_pct"] == 40.0 and r["line_items"][0]["unit_cost"] == 118.5
 assert r["line_items"][1]["unit_cost"] is None
+assert r["currency"] == "MXN"
 
-from core.quote_actions import _cost_sale_price
+from core.quote_actions import _cost_sale_price, _fx_factor
 class _M:  # minimal LineMatch stand-in: only .line is read
     def __init__(self, line): self.line = line
 assert _cost_sale_price(_M({"unit_cost": 100.0}), 40.0, 25) == 140.0
 assert _cost_sale_price(_M({"unit_cost": 100.0}), None, 25) == 125.0
 assert _cost_sale_price(_M({"unit_cost": None}), 40.0, 25) is None
+assert _cost_sale_price(_M({"unit_cost": 100.0}), 40.0, 25, fx=0.1) == 14.0
+
+class _FxOdoo:  # rates relative to company currency (USD=1)
+    def search_read(self, model, dom, fields, **kw):
+        return [{"name": "MXN", "rate": 17.0}, {"name": "USD", "rate": 1.0}]
+assert abs(_fx_factor(_FxOdoo(), "MXN", "USD") - 1 / 17.0) < 1e-9
+assert _fx_factor(_FxOdoo(), "USD", "USD") == 1.0
+assert _fx_factor(_FxOdoo(), None, "USD") is None
+assert _fx_factor(_FxOdoo(), "EUR", "USD") is None  # no rate returned -> refuse
 print("OK supplier-quote pricing")
 
 if len(sys.argv) > 1:  # live LLM smoke: python scripts/test_rfq_parse.py <rfq.xlsx|.png|.txt>

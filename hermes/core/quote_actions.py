@@ -159,14 +159,40 @@ def _find_partner(odoo: OdooClient, name: str, threshold: int,
     return best if best and best_score >= threshold else None
 
 
-def _cost_sale_price(m: LineMatch, margin_pct, default_pct) -> float | None:
+def _cost_sale_price(m: LineMatch, margin_pct, default_pct, fx: float = 1.0) -> float | None:
     """Supplier-quote mode: the RFQ email attached OUR SUPPLIER's quote and the
-    body instructed a profit margin — sale price = our cost * (1 + margin)."""
+    body instructed a profit margin — sale price = our cost * fx * (1 + margin),
+    where fx converts the document's currency into the quote's currency."""
     c = m.line.get("unit_cost")
     if c is None:
         return None
     pct = default_pct if margin_pct is None else margin_pct
-    return round(c * (1 + pct / 100.0), 2)
+    return round(c * fx * (1 + pct / 100.0), 2)
+
+
+def _quote_currency(odoo: OdooClient, partner_id: int) -> str | None:
+    """The currency the customer's draft quote will use = their Odoo pricelist's."""
+    p = odoo.search_read("res.partner", [["id", "=", partner_id]], ["property_product_pricelist"])
+    plist = (p or [{}])[0].get("property_product_pricelist")
+    if not plist:
+        return None
+    pl = odoo.search_read("product.pricelist", [["id", "=", plist[0]]], ["currency_id"])
+    cur = (pl or [{}])[0].get("currency_id")
+    return cur[1] if cur else None
+
+
+def _fx_factor(odoo: OdooClient, doc_ccy: str | None, quote_ccy: str | None) -> float | None:
+    """Multiplier turning document-currency amounts into quote-currency amounts.
+    None = cannot determine safely (unknown doc currency / missing Odoo rate)."""
+    if not doc_ccy or not quote_ccy:
+        return None
+    if doc_ccy == quote_ccy:
+        return 1.0
+    rates = {r["name"]: r["rate"] for r in odoo.search_read(
+        "res.currency", [["name", "in", [doc_ccy, quote_ccy]]], ["name", "rate"])}
+    if rates.get(doc_ccy) and rates.get(quote_ccy):
+        return rates[quote_ccy] / rates[doc_ccy]
+    return None
 
 
 def _trusted(m: LineMatch) -> bool:
@@ -288,9 +314,11 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             sheets.append_row(audit_tab, a)
         return out
 
+    fx = 1.0  # document currency -> quote currency, resolved once the partner is known
+
     def sale_of(m):
         return _cost_sale_price(m, rfq.get("margin_pct"),
-                                cfg.get("pricebook", {}).get("default_markup_pct", 25))
+                                cfg.get("pricebook", {}).get("default_markup_pct", 25), fx)
 
     auto = [m for m in matches if m.status == "matched"]
     # a queue-status line WITH a supplier cost is priceable (cost*margin) — it goes
@@ -322,6 +350,20 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         _audit("needs_review", f"no Odoo partner for '{customer}' "
                                f"({out.auto_priced} auto, {out.queued} unpriced line(s) on hold)", "ok")
     else:
+        if costed:
+            # supplier costs are in the DOCUMENT's currency; the quote uses the
+            # customer's pricelist currency — convert, or refuse to price blind
+            doc_ccy = rfq.get("currency")
+            quote_ccy = _quote_currency(odoo, partner["id"])
+            fx = _fx_factor(odoo, doc_ccy, quote_ccy)
+            if fx is None:
+                _audit("currency", f"can't convert supplier costs ({doc_ccy or 'currency unknown'}) to "
+                                   f"quote currency ({quote_ccy or '?'}) — {len(costed)} line(s) queued unpriced", "error")
+                queue, costed = queue + costed, []
+                out.auto_priced, out.queued = len(auto), len(queue)
+                fx = 1.0
+            elif fx != 1.0:
+                _audit("currency", f"supplier costs {doc_ccy} -> {quote_ccy} at rate {fx:.6f}", "ok")
         # an explicit cost+margin instruction overrides the catalog price
         auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                        **({"price_unit": p} if (p := sale_of(m)) is not None else {})}

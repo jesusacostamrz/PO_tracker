@@ -41,6 +41,7 @@ Return ONLY a JSON object (null where absent):
   "customer_name": string,   // the requesting company, if identifiable; else null
   "rfq_ref": string,         // the customer's RFQ/requisition number, if any; else null
   "margin_pct": number,      // profit margin % EXPLICITLY instructed in the email body (e.g. "add 40%"); else null
+  "currency": string,        // ISO code (MXN, USD, ...) of the unit prices ON THE DOCUMENT — from an explicit currency label/legend; null if prices absent or currency not shown
   "line_items": [
     {{"part_number": string,  // manufacturer part number / catalog code; null if only a description
       "description": string,  // what the item is, as written
@@ -138,6 +139,8 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
             return None
 
     result["margin_pct"] = _f(result.get("margin_pct"))
+    cur = str(result.get("currency") or "").strip().upper()
+    result["currency"] = cur if len(cur) == 3 and cur.isalpha() else None
     # normalize lines defensively — downstream indexes these keys
     for li in result["line_items"]:
         li["part_number"] = (li.get("part_number") or None)
