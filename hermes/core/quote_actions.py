@@ -173,13 +173,16 @@ def _name_score(a: str, b: str) -> int:
 
 def _cost_sale_price(m: LineMatch, margin_pct, default_pct, fx: float = 1.0) -> float | None:
     """Supplier-quote mode: the RFQ email attached OUR SUPPLIER's quote and the
-    body instructed a profit margin — sale price = our cost * fx * (1 + margin),
-    where fx converts the document's currency into the quote's currency."""
+    body instructed a profit margin — margin is ON THE SELLING PRICE (user rule):
+    sale = cost * fx / (1 - margin), e.g. cost 1000 at 40% -> 1666.67. fx converts
+    the document's currency into the quote's currency."""
     c = m.line.get("unit_cost")
     if not c or c <= 0:  # 0.00 / "SIN COSTO" lines must still reach the human queue
         return None
     pct = default_pct if margin_pct is None else margin_pct
-    return round(c * fx * (1 + pct / 100.0), 2)
+    if not 0 <= pct < 100:  # margin >= 100% of the sale price is nonsense — queue it
+        return None
+    return round(c * fx / (1 - pct / 100.0), 2)
 
 
 def _quote_currency(odoo: OdooClient, partner_id: int) -> str | None:
@@ -370,8 +373,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                                f"({out.auto_priced} auto, {out.queued} unpriced line(s) on hold)", "ok")
     else:
         # explicit body instruction "take the prices from <site>" — a validated
-        # offer from THAT site becomes the line's cost (sale = price * fx *
-        # (1 + margin), same machinery as supplier-quote mode); lines the site
+        # offer from THAT site becomes the line's cost (sale = price * fx /
+        # (1 - margin), same machinery as supplier-quote mode); lines the site
         # can't price stay on the human Pricing Queue as usual
         site = rfq.get("price_source_site")
         if site and queue and search is not None and llm is not None:

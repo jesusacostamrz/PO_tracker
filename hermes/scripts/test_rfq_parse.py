@@ -44,7 +44,7 @@ assert r["_via"] == "vision" and r["_source"] == "vision"
 pp.extract_text, pp.render_pages_as_data_urls = _orig
 print("OK pdf routing")
 
-# supplier-quote mode: margin_pct + unit_cost normalized; sale = cost * (1 + margin)
+# supplier-quote mode: margin_pct + unit_cost normalized; sale = cost / (1 - margin)
 class _CostLLM:
     def chat_json(self, **kw):
         return {"customer_name": "ABC", "margin_pct": "40", "currency": "mxn",
@@ -60,10 +60,13 @@ assert r["line_items"][1]["cost_currency"] is None
 from core.quote_actions import _cost_sale_price, _fx_factor
 class _M:  # minimal LineMatch stand-in: only .line is read
     def __init__(self, line): self.line = line
-assert _cost_sale_price(_M({"unit_cost": 100.0}), 40.0, 25) == 140.0
-assert _cost_sale_price(_M({"unit_cost": 100.0}), None, 25) == 125.0
+# margin is on the SELLING price: sale = cost / (1 - margin)
+assert _cost_sale_price(_M({"unit_cost": 1000.0}), 40.0, 25) == 1666.67  # user's example
+assert _cost_sale_price(_M({"unit_cost": 100.0}), None, 25) == 133.33    # default margin
 assert _cost_sale_price(_M({"unit_cost": None}), 40.0, 25) is None
-assert _cost_sale_price(_M({"unit_cost": 100.0}), 40.0, 25, fx=0.1) == 14.0
+assert _cost_sale_price(_M({"unit_cost": 0.0}), 40.0, 25) is None        # SIN COSTO -> queue
+assert _cost_sale_price(_M({"unit_cost": 100.0}), 100.0, 25) is None     # absurd margin -> queue
+assert _cost_sale_price(_M({"unit_cost": 100.0}), 40.0, 25, fx=0.1) == 16.67
 
 class _FxOdoo:  # rates relative to company currency (USD=1)
     def search_read(self, model, dom, fields, **kw):

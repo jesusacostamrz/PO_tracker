@@ -112,12 +112,13 @@ Three layers, deliberately separated:
   0, recorded in the Pricing Queue; product image attached best-effort) so EVERY RFQ
   line lands on the draft quotation immediately — auto-matched lines priced from the
   pricelist, lines with an extracted supplier cost (supplier-quote mode) at
-  cost × fx × (1 + margin), remaining queued lines at price 0. Web-researched price suggestions (Pricing Queue
+  cost × fx ÷ (1 − margin) — margin is on the SELLING price, so 40% on cost
+  1000 quotes 1666.67 — remaining queued lines at price 0. Web-researched price suggestions (Pricing Queue
   cols Q-S: Web Price, Web Currency, Web Source) are advisory only — a human always
   confirms Sale Price before it reaches the quote — with ONE exception: when the email
   body EXPLICITLY orders pricing from a named website (parsed to `price_source_site`),
   a validated offer from THAT site only becomes the line's cost and is quoted at
-  cost × fx × (1 + margin); off-site offers are demoted to reference links and
+  cost × fx ÷ (1 − margin); off-site offers are demoted to reference links and
   unpriceable lines still queue. Drafts are still never confirmed/sent.
 
 ## Secrets & config
