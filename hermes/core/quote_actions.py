@@ -152,11 +152,23 @@ def _find_partner(odoo: OdooClient, name: str, threshold: int,
             cands = odoo.find_partners(words[0], limit=10)
     best, best_score = None, 0
     for c in cands:
-        s = max(fuzz.token_set_ratio(name.lower(), (c.get(k) or "").lower())
+        s = max(_name_score(name.lower(), (c.get(k) or "").lower())
                 for k in ("name", "display_name"))
         if s > best_score:
             best, best_score = c, s
     return best if best and best_score >= threshold else None
+
+
+def _name_score(a: str, b: str) -> int:
+    """Company-name similarity. NOT token_set_ratio: one shared generic word
+    ("Industrial Magza" vs "CA Industrial") scored 87 there and quoted the wrong
+    customer. Containment (every word of one name inside the other, e.g. legal
+    suffixes: "Stober Mexico" vs "Stober Mexico S de RL") is a match; anything
+    else must earn the threshold on the FULL names."""
+    ta, tb = set(a.split()), set(b.split())
+    if ta and tb and (ta <= tb or tb <= ta):
+        return 100
+    return fuzz.token_sort_ratio(a, b)
 
 
 def _cost_sale_price(m: LineMatch, margin_pct, default_pct, fx: float = 1.0) -> float | None:

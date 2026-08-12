@@ -220,6 +220,14 @@ assert _domain("AutomationDirect.com") == "automationdirect.com"
 assert _domain("not a site") is None and _domain(None) is None
 print("OK rfq_parser._domain normalization")
 
+# partner-name scoring: one shared generic word must NOT clear the 85 threshold
+from core.quote_actions import _name_score
+assert _name_score("industrial magza", "ca industrial") < 85          # the S03178/79 wrong-customer bug
+assert _name_score("stober mexico", "stober mexico s de rl") == 100   # legal-suffix containment
+assert _name_score("ca industrial sa de cv", "ca industrial") == 100
+assert _name_score("aluminio de baja california", "aluminio de baja california sa") == 100
+print("OK _name_score rejects generic-word collisions, keeps containment")
+
 # set_unspsc: catalog-grounded — noun -> real catalog candidates -> pick among them only
 from core.quote_actions import set_unspsc
 

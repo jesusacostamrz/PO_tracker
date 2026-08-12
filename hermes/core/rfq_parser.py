@@ -66,9 +66,12 @@ Rules:
   (their letterhead/folio, prices listed — a "Cotización", not a request) AND the body asks us to
   build a customer quote from it (it names a customer and/or a profit margin). The body does NOT
   need to say "supplier" — a margin instruction only makes sense against the document's prices.
-  Then: customer_name comes from the body instruction (NEVER the company that issued the
-  quotation), each line's unit price on the document is OUR COST -> unit_cost (with its
-  cost_currency when the document shows it per line), and rfq_ref is that quotation's folio/number.
+  Then: customer_name comes ONLY from the body instruction — even a short or lowercase name
+  ("quote for abc" -> customer_name "abc") — NEVER from the attached document: every company
+  on it (the quotation's issuer, letterhead, addressee) is a supplier-side party, not the
+  customer. If the body names no customer, customer_name is null. Each line's unit price on
+  the document is OUR COST -> unit_cost (with its cost_currency when the document shows it
+  per line), and rfq_ref is that quotation's folio/number.
 - RFQs usually arrive FORWARDED by our own salespeople — ignore the forwarder. The customer is the
   ORIGINAL sender in the quoted forwarded header (its "From:"/"De:" line); take their company name,
   or infer it from their email domain (e.g. jperez@acme-corp.com -> Acme Corp).
