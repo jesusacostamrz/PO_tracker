@@ -128,7 +128,8 @@ def main() -> int:
     ap.add_argument("--odoo-db", default=None)
     ap.add_argument("--max", type=int, default=25)
     ap.add_argument("--watch", type=int, default=0)
-    ap.add_argument("--mark-read", action="store_true")
+    # Default ON — see intake.py: the unread-only poll query relies on it.
+    ap.add_argument("--mark-read", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
 
     cfg = load_config()

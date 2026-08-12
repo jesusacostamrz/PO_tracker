@@ -156,7 +156,11 @@ def main() -> int:
     ap.add_argument("--odoo-db", default=None, help="target a different Odoo database (e.g. a test copy)")
     ap.add_argument("--max", type=int, default=25, help="max messages to pull per poll")
     ap.add_argument("--watch", type=int, default=0, help="keep polling every N seconds (0 = run once)")
-    ap.add_argument("--mark-read", action="store_true", help="also clear UNREAD on handled messages (live only)")
+    # Default ON: the poll query is unread-only (label exclusion hides thread
+    # replies — Gmail gives them the conversation's labels on arrival), so
+    # clearing UNREAD on handled messages is what stops reprocessing.
+    ap.add_argument("--mark-read", action=argparse.BooleanOptionalAction, default=True,
+                    help="clear UNREAD on handled messages (live only); --no-mark-read to keep unread")
     args = ap.parse_args()
 
     cfg = load_config()

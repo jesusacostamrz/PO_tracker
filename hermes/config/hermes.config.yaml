@@ -10,7 +10,10 @@ gmail:
   account: pounicontrol@gmail.com
   oauth_client_path: ./.secrets/google_oauth_client.json   # OAuth Desktop client JSON
   token_path: ./.secrets/gmail_token.json                  # minted on first consent
-  poll_query: "is:unread has:attachment filename:pdf -label:Hermes/Processed -label:Hermes/NeedsReview"
+  # Unread-only + mark-read on label (NOT label exclusion): Gmail gives a reply
+  # arriving into a labeled conversation the thread's labels, so "-label:X"
+  # permanently hides new thread replies. newer_than bounds the cutover backlog.
+  poll_query: "is:unread has:attachment filename:pdf newer_than:7d"
   labels:
     processed: Hermes/Processed
     needs_review: Hermes/NeedsReview
@@ -37,7 +40,7 @@ sheets:
 
 rfq:
   # Team convention: forward RFQ emails with "RFQ" in the subject.
-  poll_query: 'is:unread subject:RFQ -label:Hermes/Processed -label:Hermes/NeedsReview'
+  poll_query: 'is:unread subject:RFQ newer_than:7d'   # same unread+mark-read scheme as gmail.poll_query above
   labels:
     processed: Hermes/Processed        # reuse existing labels
     needs_review: Hermes/NeedsReview
