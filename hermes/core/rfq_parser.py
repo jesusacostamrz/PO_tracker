@@ -56,6 +56,9 @@ Return ONLY a JSON object (null where absent):
 
 Rules:
 - Extract EVERY requested item; never invent items; never drop rows.
+- The EMAIL SUBJECT is a salesperson instruction channel: anything after "RFQ" is usually the
+  customer name ("RFQ ABC" / "RE: rfq acme" -> customer_name "ABC"/"acme"). A subject or body
+  customer name always beats one inferred from attachments.
 - The EMAIL BODY may carry explicit instructions from OUR OWN salesperson. Those instructions
   OVERRIDE anything inferred from the attached document: "quote for <X>" / "cotización para <X>"
   names the customer (customer_name = X, resolve to the full company name if obvious); a stated
@@ -88,6 +91,16 @@ Rules:
 - Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer
   typed (unit_cost in supplier-quote mode is the one exception).
 - Output JSON only — no prose, no code fences."""
+
+
+_INSTR_SYSTEM = """You read a short email (subject and body) written by OUR OWN salesperson about
+building a customer quote. Extract ONLY what the text EXPLICITLY states — no inference,
+no guessing. Spanish/English. Ignore signatures and disclaimers; quoted earlier messages
+in the thread count as salesperson text. Return ONLY JSON:
+{"customer_name": string|null,    // "quote for X" / "cotizacion para X" / subject "RFQ X" -> X, verbatim (even short/lowercase)
+ "margin_pct": number|null,       // "add 40%", "40% profit margin", "margen del 30%"
+ "price_source_site": string|null} // domain, ONLY on an explicit order to take prices from that website
+If the text states none of these, use null. JSON only."""
 
 
 def _domain(v) -> str | None:
@@ -150,6 +163,22 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
         result = {"customer_name": None, "rfq_ref": None, "line_items": [], "_source": "empty"}
 
     result["line_items"] = [li for li in (result.get("line_items") or []) if isinstance(li, dict)]
+
+    # Salesperson instructions (subject + body) are re-extracted in a SECOND pass
+    # with no attachment in sight, then override the main parse IN CODE — the
+    # attached document must never outvote the salesperson's own message
+    # (a supplier quote's letterhead once won over "quote for abc" in the body).
+    instr_src = "\n\n".join(p for k, fn, p in sources
+                            if k == "text" and fn in ("email-subject", "email-body")).strip()
+    if instr_src:
+        try:
+            instr = llm.chat_json(system=_INSTR_SYSTEM, user=instr_src[:4000], max_tokens=300) or {}
+        except Exception:
+            instr = {}  # best-effort: fall back to the main parse's values
+        for key in ("customer_name", "margin_pct", "price_source_site"):
+            v = instr.get(key)
+            if v not in (None, ""):
+                result[key] = v
 
     def _f(v):
         try:

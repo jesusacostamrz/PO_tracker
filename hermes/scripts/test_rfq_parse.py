@@ -74,6 +74,22 @@ assert _fx_factor(_FxOdoo(), None, "USD") is None
 assert _fx_factor(_FxOdoo(), "EUR", "USD") is None  # no rate returned -> refuse
 print("OK supplier-quote pricing")
 
+# instruction override: the subject/body second pass beats the document's parse
+class _TwoPassLLM:
+    def chat_json(self, system, user, max_tokens=0):
+        if '"line_items"' in system:  # main extraction prompt carries the schema
+            return {"customer_name": "Industrial Magza",  # document letterhead slip
+                    "line_items": [{"description": "reductor", "quantity": 1, "unit_cost": 100}]}
+        return {"customer_name": "abc", "margin_pct": "40",
+                "price_source_site": "https://www.AutomationDirect.com/adc"}
+
+r = parse_rfq([("text", "email-subject", "EMAIL SUBJECT: rfq abc"),
+               ("text", "email-body", "quote for abc with 40% margin")], _TwoPassLLM(), {})
+assert r["customer_name"] == "abc", r["customer_name"]
+assert r["margin_pct"] == 40.0 and r["price_source_site"] == "automationdirect.com"
+assert r["line_items"][0]["unit_cost"] == 100.0  # line items untouched by the override
+print("OK salesperson-instruction override beats document parse")
+
 if len(sys.argv) > 1:  # live LLM smoke: python scripts/test_rfq_parse.py <rfq.xlsx|.png|.txt>
     from core.config import load_config
     from connectors.llm_client import LLMClient

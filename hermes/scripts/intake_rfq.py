@@ -55,9 +55,13 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
                      search=None):
     labels = cfg["rfq"]["labels"]
     full = gm.get_message(msg_id)
-    subj = (gm.headers(full).get("subject") or "(no subject)")[:50]
+    subj_full = gm.headers(full).get("subject") or "(no subject)"
+    subj = subj_full[:50]
 
     sources = _sources_from_message(gm, full)
+    # the subject is a salesperson instruction channel too ("RFQ ABC" names
+    # the customer) — hand it to the parser alongside the body
+    sources.insert(0, ("text", "email-subject", f"EMAIL SUBJECT: {subj_full}"))
     if not sources:
         if not dry:
             gm.apply_label(msg_id, labels["needs_review"], mark_read=mark_read)
