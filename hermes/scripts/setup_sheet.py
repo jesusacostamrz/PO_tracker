@@ -287,8 +287,7 @@ def main() -> int:
     qc.auto_resize(qd_sid, 2)
     print(f"  [Dashboard] {len(qdash_rows)} KPI rows")
     print("Done. Quotes workbook tabs:", ", ".join(qc.tab_names()))
-    print("Quotes rows tint by Quote Status: amber=not sent · red=stale · "
-          "blue=sent · green=won · gray=lost.")
+    print("Quotes rows tint: green=sent/won · gray=cancelled/lost · light red=pending.")
     return 0
 
 
