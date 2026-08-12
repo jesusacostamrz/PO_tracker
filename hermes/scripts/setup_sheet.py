@@ -81,16 +81,16 @@ QUOTES_HEADERS = [
     "Quote Status", "Human Notes",                         # 10-11 K-L (human-owned)
 ]
 QUOTES_DROPDOWNS = {
-    4: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Dry-run"],
+    4: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Cancelled", "Dry-run"],
     10: ["Not Sent", "Sent", "Won", "Lost"],               # human-owned
 }
 QUOTES_HIDDEN_COLS = [8, 9]
 
-# Quote Status row tints: unsent pops (amber; red once stale), sent is calm blue,
-# won green, lost gray. Empty Quote Status counts as Not Sent.
-TINT_SENT = (0.85, 0.91, 0.98)   # light blue
-TINT_LOST = (0.93, 0.93, 0.93)   # gray
-QUOTES_STALE_DAYS = 2            # Not Sent older than this -> red
+# Quotes row tints (user scheme 2026-08-12): green = sent (Won counts as sent),
+# gray = cancelled (Lost counts too), light red = everything still in play.
+TINT_LOST = (0.93, 0.93, 0.93)     # gray
+TINT_PENDING = (1.00, 0.88, 0.88)  # light red: quote not yet out the door
+QUOTES_STALE_DAYS = 2              # dashboard KPI only: pending quotes older than this
 
 # Pricing Queue: one row per unresolved RFQ line. Human-owned cols M-P (idx 12-15).
 # Cols Q-S (idx 16-18) are Hermes-owned: web-researched price SUGGESTIONS only, never
@@ -176,21 +176,15 @@ def _style_quotes(sc: SheetsClient, sid: int, n_cols: int) -> None:
     sc.clear_body_format(sid)      # undo the navy-body bleed
     sc.clear_visual_rules(sid)
     sc.add_banding(sid, n_cols)
-    # First matching rule wins: explicit human status first, then follow-up alarms.
-    sc.add_conditional_rule(sid, n_cols, '=$K2="Won"', TINT_MATCHED)
-    sc.add_conditional_rule(sid, n_cols, '=$K2="Lost"', TINT_LOST)
-    sc.add_conditional_rule(sid, n_cols, '=$K2="Sent"', TINT_SENT)
-    stale = (f'=AND($D2<>"", OR($K2="", $K2="Not Sent"), '
-             f'IFERROR(DATEVALUE(LEFT($A2,10)) < TODAY()-{QUOTES_STALE_DAYS}, FALSE))')
-    sc.add_conditional_rule(sid, n_cols, stale, TINT_NOMATCH)                        # red: stale unsent
-    sc.add_conditional_rule(sid, n_cols, '=AND($D2<>"", OR($K2="", $K2="Not Sent"))',
-                            TINT_REVIEW)                                             # amber: unsent
-    sc.add_conditional_rule(sid, n_cols, '=$E2="Needs Review"', TINT_REVIEW)
+    # First matching rule wins: gray dead rows, green sent rows, light red the rest.
+    sc.add_conditional_rule(sid, n_cols, '=OR($E2="Cancelled", $K2="Lost")', TINT_LOST)
+    sc.add_conditional_rule(sid, n_cols, '=OR($K2="Sent", $K2="Won")', TINT_MATCHED)
+    sc.add_conditional_rule(sid, n_cols, '=$A2<>""', TINT_PENDING)
     sc.hide_columns(sid, list(range(n_cols)), hidden=False)
     sc.hide_columns(sid, QUOTES_HIDDEN_COLS)
     sc.set_basic_filter(sid, n_cols)
-    print("  [Quotes] visuals: banding, quote-status row colors "
-          f"(unsent amber, >{QUOTES_STALE_DAYS}d red), plumbing hidden, filter on")
+    print("  [Quotes] visuals: banding, row colors (green sent, gray cancelled/lost, "
+          "light red pending), plumbing hidden, filter on")
 
 
 def _style_orders(sc: SheetsClient, sid: int, n_cols: int) -> None:

@@ -107,6 +107,10 @@ runtime:
   log_level: INFO
 
 pricebook:
+  # RFQ quote pricing when the email states no margin: sale = cost / (1 - pct/100).
+  # Margin is on the SELLING price (30% -> cost / 0.7), per user rule 2026-08-12.
+  default_margin_pct: 30
+  # Pricelist IMPORT markup (import_pricelist.py): sale = cost * (1 + pct/100).
   default_markup_pct: 25
   brands:
     acme:                              # key used as --brand acme

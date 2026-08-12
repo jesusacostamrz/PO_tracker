@@ -340,7 +340,7 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         if f is None:  # unknown currency/rate — refuse to price blind
             return None
         return _cost_sale_price(m, rfq.get("margin_pct"),
-                                cfg.get("pricebook", {}).get("default_markup_pct", 25), f)
+                                cfg.get("pricebook", {}).get("default_margin_pct", 30), f)
 
     auto = [m for m in matches if m.status == "matched"]
     # a queue-status line WITH a supplier cost is priceable (cost*margin) — it goes

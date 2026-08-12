@@ -62,7 +62,7 @@ class _M:  # minimal LineMatch stand-in: only .line is read
     def __init__(self, line): self.line = line
 # margin is on the SELLING price: sale = cost / (1 - margin)
 assert _cost_sale_price(_M({"unit_cost": 1000.0}), 40.0, 25) == 1666.67  # user's example
-assert _cost_sale_price(_M({"unit_cost": 100.0}), None, 25) == 133.33    # default margin
+assert _cost_sale_price(_M({"unit_cost": 100.0}), None, 30) == 142.86    # default margin /0.7
 assert _cost_sale_price(_M({"unit_cost": None}), 40.0, 25) is None
 assert _cost_sale_price(_M({"unit_cost": 0.0}), 40.0, 25) is None        # SIN COSTO -> queue
 assert _cost_sale_price(_M({"unit_cost": 100.0}), 100.0, 25) is None     # absurd margin -> queue
