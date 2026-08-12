@@ -315,11 +315,17 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             sheets.append_row(audit_tab, a)
         return out
 
-    fx = 1.0  # document currency -> quote currency, resolved once the partner is known
+    fx_map: dict = {}  # cost currency -> quote-currency factor, filled once the partner is known
+
+    def _ccy(m):  # a line's own currency wins; documents can mix USD and MXN lines
+        return m.line.get("cost_currency") or rfq.get("currency")
 
     def sale_of(m):
+        f = fx_map.get(_ccy(m), 1.0)
+        if f is None:  # unknown currency/rate — refuse to price blind
+            return None
         return _cost_sale_price(m, rfq.get("margin_pct"),
-                                cfg.get("pricebook", {}).get("default_markup_pct", 25), fx)
+                                cfg.get("pricebook", {}).get("default_markup_pct", 25), f)
 
     auto = [m for m in matches if m.status == "matched"]
     # a queue-status line WITH a supplier cost is priceable (cost*margin) — it goes
@@ -352,19 +358,20 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                                f"({out.auto_priced} auto, {out.queued} unpriced line(s) on hold)", "ok")
     else:
         if costed:
-            # supplier costs are in the DOCUMENT's currency; the quote uses the
-            # customer's pricelist currency — convert, or refuse to price blind
-            doc_ccy = rfq.get("currency")
+            # supplier costs are in the DOCUMENT's currency (possibly mixed per
+            # line); the quote uses the customer's pricelist currency — convert
+            # each line, or refuse to price the ones we can't convert
             quote_ccy = _quote_currency(odoo, partner["id"])
-            fx = _fx_factor(odoo, doc_ccy, quote_ccy)
-            if fx is None:
-                _audit("currency", f"can't convert supplier costs ({doc_ccy or 'currency unknown'}) to "
-                                   f"quote currency ({quote_ccy or '?'}) — {len(costed)} line(s) queued unpriced", "error")
-                queue, costed = queue + costed, []
-                out.auto_priced, out.queued = len(auto), len(queue)
-                fx = 1.0
-            elif fx != 1.0:
-                _audit("currency", f"supplier costs {doc_ccy} -> {quote_ccy} at rate {fx:.6f}", "ok")
+            for c in {_ccy(m) for m in costed}:
+                fx_map[c] = _fx_factor(odoo, c, quote_ccy)
+                if fx_map[c] not in (None, 1.0):
+                    _audit("currency", f"supplier costs {c} -> {quote_ccy} at rate {fx_map[c]:.6f}", "ok")
+            bad = [m for m in costed if sale_of(m) is None]
+            if bad:
+                _audit("currency", f"can't convert supplier costs to quote currency ({quote_ccy or '?'}) "
+                                   f"— {len(bad)} line(s) queued unpriced", "error")
+                queue, costed = queue + bad, [m for m in costed if sale_of(m) is not None]
+                out.auto_priced, out.queued = len(auto) + len(costed), len(queue)
         # an explicit cost+margin instruction overrides the catalog price
         auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                        **({"price_unit": p} if (p := sale_of(m)) is not None else {})}

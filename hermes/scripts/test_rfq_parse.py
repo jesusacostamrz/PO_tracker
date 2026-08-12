@@ -48,12 +48,14 @@ print("OK pdf routing")
 class _CostLLM:
     def chat_json(self, **kw):
         return {"customer_name": "ABC", "margin_pct": "40", "currency": "mxn",
-                "line_items": [{"description": "valvula", "quantity": 2, "unit_cost": "118.50"},
+                "line_items": [{"description": "valvula", "quantity": 2, "unit_cost": "118.50",
+                                "cost_currency": "usd"},
                                {"description": "cable", "quantity": 1}]}
 r = parse_rfq([("text", "email-body", "quote for ABC +40%")], _CostLLM(), {})
 assert r["margin_pct"] == 40.0 and r["line_items"][0]["unit_cost"] == 118.5
 assert r["line_items"][1]["unit_cost"] is None
-assert r["currency"] == "MXN"
+assert r["currency"] == "MXN" and r["line_items"][0]["cost_currency"] == "USD"
+assert r["line_items"][1]["cost_currency"] is None
 
 from core.quote_actions import _cost_sale_price, _fx_factor
 class _M:  # minimal LineMatch stand-in: only .line is read

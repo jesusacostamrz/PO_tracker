@@ -47,7 +47,8 @@ Return ONLY a JSON object (null where absent):
       "description": string,  // what the item is, as written
       "manufacturer": string, // brand/maker (e.g. NITRA, SMC, BIMBA) — from a brand column OR embedded in the description; else null
       "quantity": number,     // requested quantity; default 1 if truly absent
-      "unit_cost": number}}   // OUR unit cost — ONLY in supplier-quote mode (rule below); else null
+      "unit_cost": number,    // OUR unit cost — ONLY in supplier-quote mode (rule below); else null
+      "cost_currency": string}} // ISO code for THIS line's unit_cost when shown per line (documents can mix USD and MXN lines); null if not shown or same as the top-level currency
   ]
 }}
 
@@ -57,10 +58,13 @@ Rules:
   OVERRIDE anything inferred from the attached document: "quote for <X>" / "cotización para <X>"
   names the customer (customer_name = X, resolve to the full company name if obvious); a stated
   profit margin ("increase 40%", "agrega 30% de margen") goes to margin_pct.
-- SUPPLIER-QUOTE MODE: sometimes the attachment is a quotation FROM OUR SUPPLIER (we are the
-  buyer on it) that the body tells us to use as the pricing basis for a customer quote. Then:
-  customer_name comes from the body instruction (NEVER the supplier company), each line's unit
-  price on the document is OUR COST -> unit_cost, and rfq_ref is the supplier's quote number.
+- SUPPLIER-QUOTE MODE: applies whenever the attachment is a QUOTATION issued by ANOTHER company
+  (their letterhead/folio, prices listed — a "Cotización", not a request) AND the body asks us to
+  build a customer quote from it (it names a customer and/or a profit margin). The body does NOT
+  need to say "supplier" — a margin instruction only makes sense against the document's prices.
+  Then: customer_name comes from the body instruction (NEVER the company that issued the
+  quotation), each line's unit price on the document is OUR COST -> unit_cost (with its
+  cost_currency when the document shows it per line), and rfq_ref is that quotation's folio/number.
 - RFQs usually arrive FORWARDED by our own salespeople — ignore the forwarder. The customer is the
   ORIGINAL sender in the quoted forwarded header (its "From:"/"De:" line); take their company name,
   or infer it from their email domain (e.g. jperez@acme-corp.com -> Acme Corp).
@@ -148,4 +152,6 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
         li["manufacturer"] = str(li.get("manufacturer") or "")
         li["quantity"] = _f(li.get("quantity")) or 1.0
         li["unit_cost"] = _f(li.get("unit_cost"))
+        lc = str(li.get("cost_currency") or "").strip().upper()
+        li["cost_currency"] = lc if len(lc) == 3 and lc.isalpha() else None
     return result
