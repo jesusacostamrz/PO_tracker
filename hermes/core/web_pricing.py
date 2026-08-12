@@ -23,7 +23,18 @@ Return ONLY a JSON object:
 {"price": number|null, "currency": "MXN"|"USD"|..., "vendor": string, "url": string, "note": string}"""
 
 
-def research_price(line: dict, llm, search, preferred_sites: tuple | list = ()) -> dict | None:
+def _same_site(url: str, site: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).netloc or "").lower()
+    site = site.lower().lstrip(".")
+    return host == site or host.endswith("." + site)
+
+
+def research_price(line: dict, llm, search, preferred_sites: tuple | list = (),
+                   only_site: str | None = None) -> dict | None:
+    """only_site: the email body explicitly ordered pricing from this domain —
+    search is restricted to it and a priced offer from any OTHER domain is
+    demoted to a reference link (price None), never returned as a price."""
     if search is None:
         return None
     part = (line.get("part_number") or "").strip()
@@ -48,10 +59,15 @@ def research_price(line: dict, llm, search, preferred_sites: tuple | list = ()) 
             # the extractor's exact-part rule still blocks a variant PRICE, so
             # this can only add reference links/images, never bad prices.
             # 0) preferred supplier catalogs first (config rfq.preferred_supplier_sites)
-            queries = [f"site:{s} {part or desc}" for s in preferred_sites]
-            queries.append(part or desc)
-            if part and mfr:
-                queries.append(f"{part} {mfr}")
+            if only_site:  # explicit instruction: this site only, no general tiers
+                queries = [f"site:{only_site} {part or desc}"]
+                if part and mfr:
+                    queries.append(f"site:{only_site} {part} {mfr}")
+            else:
+                queries = [f"site:{s} {part or desc}" for s in preferred_sites]
+                queries.append(part or desc)
+                if part and mfr:
+                    queries.append(f"{part} {mfr}")
             keys = [part] if part else [None]
             stripped = re.sub(r"^[A-Za-z]+[-\s]+", "", part)
             if part and stripped != part and len(re.sub(r"[^a-zA-Z0-9]", "", stripped)) >= 6:
@@ -75,6 +91,8 @@ def research_price(line: dict, llm, search, preferred_sites: tuple | list = ()) 
                 "Si no hay disponibilidad en Mexico, lista ofertas internacionales. "
                 "Para cada oferta incluye: precio, moneda, proveedor y URL del producto."
             )
+            if only_site:
+                prompt += f" SOLO considera ofertas del sitio {only_site}."
             result = search.web_search(prompt, country="MX")
         if not result or not result.get("text"):
             return None
@@ -91,6 +109,10 @@ def research_price(line: dict, llm, search, preferred_sites: tuple | list = ()) 
             return {"price": None, "currency": "", "vendor": offer.get("vendor") or "",
                     "url": url, "note": offer.get("note") or "no trustworthy offer found"}
         offer["price"] = float(price)
+        if only_site and not _same_site(offer.get("url") or "", only_site):
+            return {"price": None, "currency": "", "vendor": offer.get("vendor") or "",
+                    "url": offer.get("url") or "",
+                    "note": f"priced offer not from {only_site} — demoted to reference"}
         return offer
     except Exception as e:
         print(f"WARN web_pricing: {e}")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 
 _MAX_TEXT_CHARS = 15000
 
@@ -41,6 +42,7 @@ Return ONLY a JSON object (null where absent):
   "customer_name": string,   // the requesting company, if identifiable; else null
   "rfq_ref": string,         // the customer's RFQ/requisition number, if any; else null
   "margin_pct": number,      // profit margin % EXPLICITLY instructed in the email body (e.g. "add 40%"); else null
+  "price_source_site": string, // web domain the body EXPLICITLY orders us to take PRICES from ("include the price from <site>", "con precios de <sitio>"); a link given only as reference or for images is NOT a pricing instruction -> null
   "currency": string,        // ISO code (MXN, USD, ...) of the unit prices ON THE DOCUMENT — from an explicit currency label/legend; null if prices absent or currency not shown
   "line_items": [
     {{"part_number": string,  // manufacturer part number / catalog code; null if only a description
@@ -57,7 +59,9 @@ Rules:
 - The EMAIL BODY may carry explicit instructions from OUR OWN salesperson. Those instructions
   OVERRIDE anything inferred from the attached document: "quote for <X>" / "cotización para <X>"
   names the customer (customer_name = X, resolve to the full company name if obvious); a stated
-  profit margin ("increase 40%", "agrega 30% de margen") goes to margin_pct.
+  profit margin ("increase 40%", "agrega 30% de margen") goes to margin_pct; an explicit order
+  to take the prices from a website ("include the price of <site>") puts that site's domain in
+  price_source_site.
 - SUPPLIER-QUOTE MODE: applies whenever the attachment is a QUOTATION issued by ANOTHER company
   (their letterhead/folio, prices listed — a "Cotización", not a request) AND the body asks us to
   build a customer quote from it (it names a customer and/or a profit margin). The body does NOT
@@ -81,6 +85,14 @@ Rules:
 - Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer
   typed (unit_cost in supplier-quote mode is the one exception).
 - Output JSON only — no prose, no code fences."""
+
+
+def _domain(v) -> str | None:
+    """'https://www.Site.com/path' / 'Site.com' -> 'site.com'; junk -> None."""
+    s = str(v or "").strip().lower()
+    s = re.sub(r"^[a-z]+://", "", s).split("/")[0].split("?")[0]
+    s = s.removeprefix("www.")
+    return s if "." in s else None
 
 
 def _img_data_url(img_bytes: bytes, filename: str) -> str:
@@ -143,6 +155,7 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
             return None
 
     result["margin_pct"] = _f(result.get("margin_pct"))
+    result["price_source_site"] = _domain(result.get("price_source_site"))
     cur = str(result.get("currency") or "").strip().upper()
     result["currency"] = cur if len(cur) == 3 and cur.isalpha() else None
     # normalize lines defensively — downstream indexes these keys

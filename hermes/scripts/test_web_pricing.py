@@ -187,6 +187,39 @@ assert pi.find_image_bytes("MHL-4", "FABCO", "valvula", StubSerperShortPart()) =
 assert pi.find_image_bytes("MHL-4", "", "valvula", StubSerperShortPart()) == b"BAD"  # no brand known -> old behavior
 print("OK find_image_bytes short part requires brand in hit")
 
+# only_site: queries restricted to the named site; off-site priced offers demoted
+class StubSerperSite:
+    kind = "serper"
+    def __init__(self):
+        self.queries = []
+    def web_search(self, prompt, country="MX", must_contain=None):
+        self.queries.append(prompt)
+        return {"text": "- BFMC-38N | $14.50 | https://www.automationdirect.com/x",
+                "sources": ["https://www.automationdirect.com/x"]}
+
+ss = StubSerperSite()
+offer = research_price({"part_number": "BFMC-38N", "description": "conector", "manufacturer": "NITRA",
+                        "quantity": 1},
+                       StubLLM({"price": 14.5, "currency": "USD", "vendor": "AD",
+                                "url": "https://www.automationdirect.com/x", "note": ""}),
+                       ss, only_site="automationdirect.com")
+assert offer is not None and offer["price"] == 14.5
+assert ss.queries and all(q.startswith("site:automationdirect.com ") for q in ss.queries), ss.queries
+print("OK research_price only_site restricts queries, www subdomain accepted")
+
+offsite = research_price(line, StubLLM({"price": 85.0, "currency": "MXN", "vendor": "X",
+                                        "url": "https://other-shop.mx/p/6204", "note": ""}),
+                         ss, only_site="automationdirect.com")
+assert offsite is not None and offsite["price"] is None and offsite["url"] == "https://other-shop.mx/p/6204"
+print("OK research_price only_site demotes off-site priced offer to reference")
+
+# body-instruction site extraction normalizes to a bare domain
+from core.rfq_parser import _domain
+assert _domain("https://www.automationdirect.com/adc/home/home") == "automationdirect.com"
+assert _domain("AutomationDirect.com") == "automationdirect.com"
+assert _domain("not a site") is None and _domain(None) is None
+print("OK rfq_parser._domain normalization")
+
 # set_unspsc: catalog-grounded — noun -> real catalog candidates -> pick among them only
 from core.quote_actions import set_unspsc
 

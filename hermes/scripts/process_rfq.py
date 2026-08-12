@@ -52,7 +52,14 @@ def main() -> int:
         print(f"FAILED (connect): {exc}")
         return 1
     llm = LLMClient.from_config(cfg)
-    print(f"RFQ {p.name}   Odoo db: {cfg['odoo']['db']}   mode: {'DRY-RUN' if dry else 'LIVE'}")
+    try:  # same optional web search as intake_rfq — keeps the bench faithful
+        from connectors.serper_client import SerperClient
+        from connectors.search_client import SearchClient
+        search = SerperClient.from_config(cfg) or SearchClient.from_config(cfg)
+    except ImportError:
+        search = None
+    print(f"RFQ {p.name}   Odoo db: {cfg['odoo']['db']}   mode: {'DRY-RUN' if dry else 'LIVE'}   "
+          f"web-pricing: {getattr(search, 'kind', 'openai') if search else 'off'}")
 
     rfq = parse_rfq([(kind, p.name, payload)], llm, cfg.get("company", {}))
     print(f"  customer: {rfq.get('customer_name')}   ref: {rfq.get('rfq_ref')}   "
@@ -66,7 +73,7 @@ def main() -> int:
         got = (m.product or {}).get("name", "-")
         print(f"  [{tag}] {want!r:45} -> {got[:45]!r}  ({m.score:.0f}) {m.reason}")
 
-    out = apply_rfq(odoo, sheets, cfg, rfq, matches, dry_run=dry,
+    out = apply_rfq(odoo, sheets, cfg, rfq, matches, dry_run=dry, search=search, llm=llm,
                     attachments=[(p.name, payload)] if kind == "pdf" else None)
     print(f"  -> status={out.status}  quote={out.order_name or '-'}  "
           f"auto={out.auto_priced}  queued={out.queued}")

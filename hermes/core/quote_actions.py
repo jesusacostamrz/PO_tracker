@@ -164,7 +164,7 @@ def _cost_sale_price(m: LineMatch, margin_pct, default_pct, fx: float = 1.0) -> 
     body instructed a profit margin — sale price = our cost * fx * (1 + margin),
     where fx converts the document's currency into the quote's currency."""
     c = m.line.get("unit_cost")
-    if c is None:
+    if not c or c <= 0:  # 0.00 / "SIN COSTO" lines must still reach the human queue
         return None
     pct = default_pct if margin_pct is None else margin_pct
     return round(c * fx * (1 + pct / 100.0), 2)
@@ -357,12 +357,43 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         _audit("needs_review", f"no Odoo partner for '{customer}' "
                                f"({out.auto_priced} auto, {out.queued} unpriced line(s) on hold)", "ok")
     else:
-        if costed:
+        # explicit body instruction "take the prices from <site>" — a validated
+        # offer from THAT site becomes the line's cost (sale = price * fx *
+        # (1 + margin), same machinery as supplier-quote mode); lines the site
+        # can't price stay on the human Pricing Queue as usual
+        site = rfq.get("price_source_site")
+        if site and queue and search is not None and llm is not None:
+            from core.web_pricing import research_price
+            for m in queue:
+                label = m.line.get("part_number") or m.line.get("description")
+                try:
+                    offer = research_price(m.line, llm, search, only_site=site)
+                except Exception as exc:  # best-effort: an un-priced line just queues
+                    offer = None
+                    _audit("web_pricing", f"{label}: {type(exc).__name__}: {exc}", "error")
+                if not offer:
+                    continue
+                m.line["_web_offer"] = offer  # Pricing Queue / image reuse — no second search
+                if offer.get("price") is not None:
+                    m.line["unit_cost"] = offer["price"]
+                    m.line["cost_currency"] = (offer.get("currency") or "").strip().upper() or None
+                    _audit("web_pricing", f"{label}: {offer['price']} {offer.get('currency') or '?'} "
+                                          f"from {offer.get('url')}", "ok")
+            priced = [m for m in queue if sale_of(m) is not None]
+            if priced:
+                costed, queue = costed + priced, [m for m in queue if sale_of(m) is None]
+                out.auto_priced, out.queued = len(auto) + len(costed), len(queue)
+                _audit("web_pricing", f"priced {len(priced)}/{len(priced) + len(queue)} line(s) "
+                                      f"from {site} (explicit instruction)", "ok")
+        # AUTO lines can carry a supplier cost too (their price_unit override
+        # below uses sale_of) — their currencies need converting just like costed
+        cost_ccys = {_ccy(m) for m in auto + costed if m.line.get("unit_cost")}
+        if cost_ccys:
             # supplier costs are in the DOCUMENT's currency (possibly mixed per
             # line); the quote uses the customer's pricelist currency — convert
             # each line, or refuse to price the ones we can't convert
             quote_ccy = _quote_currency(odoo, partner["id"])
-            for c in {_ccy(m) for m in costed}:
+            for c in cost_ccys:
                 fx_map[c] = _fx_factor(odoo, c, quote_ccy)
                 if fx_map[c] not in (None, 1.0):
                     _audit("currency", f"supplier costs {c} -> {quote_ccy} at rate {fx_map[c]:.6f}", "ok")
@@ -387,6 +418,11 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             pdef = cfg["rfq"].get("product_defaults") or {}
             created_products, created_ids = _create_missing_products(
                 odoo, cfg, queue + costed, _audit, price_of=lambda m: sale_of(m) or 0.0)
+            for m in costed:  # a web-priced line's product page doubles as its image source
+                pid = (m.product or {}).get("id")
+                url = (m.line.get("_web_offer") or {}).get("url")
+                if pid and url:
+                    offer_urls.setdefault(pid, url)
 
             costed_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                             "price_unit": sale_of(m),
@@ -434,7 +470,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             research_price = None
         for m in queue:
             web_price = web_currency = web_source = ""
-            if research_price and search is not None and llm is not None:
+            offer = m.line.get("_web_offer")  # already researched by the explicit-site pass
+            if offer is None and research_price and search is not None and llm is not None:
                 try:
                     offer = research_price(m.line, llm, search,
                                            preferred_sites=cfg["rfq"].get("preferred_supplier_sites") or ())
@@ -442,16 +479,16 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                     offer = None
                     _audit("web_pricing", f"{m.line.get('part_number') or m.line.get('description')}: "
                                           f"{type(exc).__name__}: {exc}", "error")
-                if offer:
-                    web_price = offer.get("price") or ""
-                    web_currency = offer.get("currency") or ""
-                    web_source = offer.get("url") or ""
-                    pid = (m.product or {}).get("id")
-                    # only a PRICED offer guarantees an exact product page — a
-                    # reference-only url may be a catalog page whose og:image
-                    # is a site banner, not the product
-                    if pid and web_source and offer.get("price") is not None:
-                        offer_urls.setdefault(pid, web_source)
+            if offer:  # fresh OR cached — either way the human gets the researched link
+                web_price = offer.get("price") or ""
+                web_currency = offer.get("currency") or ""
+                web_source = offer.get("url") or ""
+                pid = (m.product or {}).get("id")
+                # only a PRICED offer guarantees an exact product page — a
+                # reference-only url may be a catalog page whose og:image
+                # is a site banner, not the product
+                if pid and web_source and offer.get("price") is not None:
+                    offer_urls.setdefault(pid, web_source)
             sheets.append_row(pq_tab, [
                 _now(), customer, rfq_ref, out.order_name, out.order_id or "",
                 m.line.get("part_number") or "", m.line.get("description") or "",
