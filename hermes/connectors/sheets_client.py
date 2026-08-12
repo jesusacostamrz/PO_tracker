@@ -195,6 +195,15 @@ class SheetsClient:
         if reqs:
             self._batch(reqs)
 
+    def clear_body_format(self, sheet_id: int) -> None:
+        """Strip direct background/text formatting from all data rows (row 2+).
+        Fixes tabs where header styling bled into the body; banding and
+        conditional rules re-add the intended colors afterwards."""
+        self._batch([{"repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1},
+            "cell": {"userEnteredFormat": {}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)"}}])
+
     def add_banding(self, sheet_id: int, n_cols: int,
                     header_rgb=(0.20, 0.33, 0.51), band_rgb=(0.95, 0.96, 0.98)) -> dict:
         """Alternating white / tinted data rows for readability."""

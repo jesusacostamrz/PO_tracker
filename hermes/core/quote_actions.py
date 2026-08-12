@@ -25,7 +25,7 @@ from core.actions import _now
 from core.product_matcher import LineMatch, norm_code
 
 # Quotes tab column indices (0-based). Lockstep with QUOTES_HEADERS in setup_sheet.py.
-Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 7, 8, 9
+Q_ORDER_ID, Q_STATUS, Q_GMAIL_MSG = 8, 4, 9
 
 _UNSPSC_NOUN_SYSTEM = (
     "For each industrial product, give ONE Spanish singular noun naming what the product "
@@ -475,13 +475,13 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
 
     # --- Quotes row (lockstep with QUOTES_HEADERS) ---
     quotes_row = [
-        _now(), customer, rfq_ref, len(matches),
-        out.auto_priced, out.queued,
-        out.order_name or ("Dry-run" if dry and partner else ""), out.order_id or "",
-        out.status, gmail_msg_id,
-        "",  # K Human Notes (human-owned)
+        _now(), customer, rfq_ref,
+        out.order_name or ("Dry-run" if dry and partner else ""),
+        out.status, len(matches), out.auto_priced, out.queued,
+        out.order_id or "", gmail_msg_id,
+        "", "",  # K Quote Status, L Human Notes (human-owned; blank = Not Sent)
     ]
-    if existing_row:  # upsert prior dry-run row; preserve K
+    if existing_row:  # upsert prior dry-run row; preserve human K:L
         sheets.update_range(f"{quotes_tab}!A{existing_row}:J{existing_row}", [quotes_row[0:10]])
         _audit("sheet_upsert", f"updated Quotes row {existing_row}", "ok")
     else:

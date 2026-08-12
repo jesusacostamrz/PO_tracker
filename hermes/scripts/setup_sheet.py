@@ -69,16 +69,28 @@ AUDIT_DROPDOWNS = {
     5: ["live", "dry-run"],
 }
 
-# Quotes tab: one row per RFQ. Human-owned: Human Notes (K / idx 10).
+# Quotes tab: one row per RFQ. Human-owned: Quote Status + Human Notes (K:L, idx
+# 10-11) — Quote Status is how a human records what happened to the quote (sent by
+# email/WhatsApp outside Hermes's reach, won, lost); Hermes never writes it.
+# Plumbing (Odoo Quote ID, Gmail Msg ID) sits at I:J and is hidden, so on screen
+# the human columns appear right after the counts.
 QUOTES_HEADERS = [
-    "Received At", "Customer", "RFQ Ref", "Lines",         # 0-3  A-D
-    "Auto-priced", "Queued", "Quote #", "Odoo Quote ID",   # 4-7  E-H
-    "Status", "Gmail Msg ID",                              # 8-9  I-J
-    "Human Notes",                                         # 10   K (human-owned)
+    "Received At", "Customer", "RFQ Ref", "Quote #",       # 0-3  A-D
+    "Status", "Lines", "Auto-priced", "Queued",            # 4-7  E-H
+    "Odoo Quote ID", "Gmail Msg ID",                       # 8-9  I-J (hidden)
+    "Quote Status", "Human Notes",                         # 10-11 K-L (human-owned)
 ]
 QUOTES_DROPDOWNS = {
-    8: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Dry-run"],
+    4: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Dry-run"],
+    10: ["Not Sent", "Sent", "Won", "Lost"],               # human-owned
 }
+QUOTES_HIDDEN_COLS = [8, 9]
+
+# Quote Status row tints: unsent pops (amber; red once stale), sent is calm blue,
+# won green, lost gray. Empty Quote Status counts as Not Sent.
+TINT_SENT = (0.85, 0.91, 0.98)   # light blue
+TINT_LOST = (0.93, 0.93, 0.93)   # gray
+QUOTES_STALE_DAYS = 2            # Not Sent older than this -> red
 
 # Pricing Queue: one row per unresolved RFQ line. Human-owned cols M-P (idx 12-15).
 # Cols Q-S (idx 16-18) are Hermes-owned: web-researched price SUGGESTIONS only, never
@@ -159,6 +171,28 @@ def _reorder_orders_data(sc: SheetsClient, tab: str, new_headers: list[str]) -> 
     return True
 
 
+def _style_quotes(sc: SheetsClient, sid: int, n_cols: int) -> None:
+    """Salesperson-friendly Quotes tab: clean body, banding, follow-up colors."""
+    sc.clear_body_format(sid)      # undo the navy-body bleed
+    sc.clear_visual_rules(sid)
+    sc.add_banding(sid, n_cols)
+    # First matching rule wins: explicit human status first, then follow-up alarms.
+    sc.add_conditional_rule(sid, n_cols, '=$K2="Won"', TINT_MATCHED)
+    sc.add_conditional_rule(sid, n_cols, '=$K2="Lost"', TINT_LOST)
+    sc.add_conditional_rule(sid, n_cols, '=$K2="Sent"', TINT_SENT)
+    stale = (f'=AND($D2<>"", OR($K2="", $K2="Not Sent"), '
+             f'IFERROR(DATEVALUE(LEFT($A2,10)) < TODAY()-{QUOTES_STALE_DAYS}, FALSE))')
+    sc.add_conditional_rule(sid, n_cols, stale, TINT_NOMATCH)                        # red: stale unsent
+    sc.add_conditional_rule(sid, n_cols, '=AND($D2<>"", OR($K2="", $K2="Not Sent"))',
+                            TINT_REVIEW)                                             # amber: unsent
+    sc.add_conditional_rule(sid, n_cols, '=$E2="Needs Review"', TINT_REVIEW)
+    sc.hide_columns(sid, list(range(n_cols)), hidden=False)
+    sc.hide_columns(sid, QUOTES_HIDDEN_COLS)
+    sc.set_basic_filter(sid, n_cols)
+    print("  [Quotes] visuals: banding, quote-status row colors "
+          f"(unsent amber, >{QUOTES_STALE_DAYS}d red), plumbing hidden, filter on")
+
+
 def _style_orders(sc: SheetsClient, sid: int, n_cols: int) -> None:
     """Make Orders read like a task list: banding, status-colored rows, clean columns, filter."""
     sc.clear_visual_rules(sid)                 # idempotent: drop prior rules before re-adding
@@ -216,10 +250,51 @@ def main() -> int:
         return 0
     print(f"\nQuotes spreadsheet {qc.spreadsheet_id}")
     print("Existing tabs:", ", ".join(qc.tab_names()) or "(none)")
-    _apply(qc, tabs["quotes"], QUOTES_HEADERS, QUOTES_DROPDOWNS)
+    q_tab = tabs["quotes"]
+    qc.ensure_tab(q_tab)
+    _reorder_orders_data(qc, q_tab, QUOTES_HEADERS)  # migrate live rows BEFORE new header
+    _apply(qc, q_tab, QUOTES_HEADERS, QUOTES_DROPDOWNS)
+    _style_quotes(qc, qc.sheet_ids()[q_tab], len(QUOTES_HEADERS))
     _apply(qc, tabs["pricing_queue"], PQ_HEADERS, PQ_DROPDOWNS)
+    qc.clear_body_format(qc.sheet_ids()[tabs["pricing_queue"]])
     _apply(qc, tabs["audit"], AUDIT_HEADERS, AUDIT_DROPDOWNS)  # quotes pipeline audits here
+
+    # Quotes Dashboard: KPI formulas over Quotes + Pricing Queue. Quote Status
+    # empty counts as Not Sent (new rows start blank). "S0*" = a real draft
+    # (col D holds "Dry-run" on dry-run rows).
+    q, pq = q_tab, tabs["pricing_queue"]
+    unsent = (f'=COUNTIFS({q}!D2:D,"S0*",{q}!K2:K,"")'
+              f'+COUNTIFS({q}!D2:D,"S0*",{q}!K2:K,"Not Sent")')
+    stale = (f'=SUMPRODUCT((LEFT({q}!D2:D,2)="S0")'
+             f'*(({q}!K2:K="")+({q}!K2:K="Not Sent"))'
+             f'*IFERROR(DATEVALUE(LEFT({q}!A2:A,10))<TODAY()-{QUOTES_STALE_DAYS},0))')
+    qdash_rows = [
+        ["Hermes — Quotes Dashboard", ""],
+        ["", ""],
+        ["RFQs received", f"=COUNTA({q}!A2:A)"],
+        ["Draft quotes created", f'=COUNTIF({q}!D2:D,"S0*")'],
+        ["Needs review", f'=COUNTIF({q}!E2:E,"Needs Review")'],
+        ["", ""],
+        ["Not sent yet", unsent],
+        [f"  … stale (>{QUOTES_STALE_DAYS} days)", stale],
+        ["Sent", f'=COUNTIF({q}!K2:K,"Sent")'],
+        ["Won", f'=COUNTIF({q}!K2:K,"Won")'],
+        ["Lost", f'=COUNTIF({q}!K2:K,"Lost")'],
+        ["Win rate (won vs lost)", f'=IFERROR(TEXT(COUNTIF({q}!K2:K,"Won")'
+                                   f'/(COUNTIF({q}!K2:K,"Won")+COUNTIF({q}!K2:K,"Lost")),"0%"),"—")'],
+        ["", ""],
+        ["Pricing Queue pending", f"=COUNTIF('{pq}'!L2:L,\"Pending\")"],
+        ["", ""],
+        ["Last setup run", "=TEXT(NOW(),\"yyyy-mm-dd hh:mm\")"],
+    ]
+    qd_sid = qc.ensure_tab("Dashboard")
+    qc.update_range(f"Dashboard!A1:B{len(qdash_rows)}", qdash_rows)
+    qc.format_header(qd_sid, 2, rgb=HERMES_BLUE)
+    qc.auto_resize(qd_sid, 2)
+    print(f"  [Dashboard] {len(qdash_rows)} KPI rows")
     print("Done. Quotes workbook tabs:", ", ".join(qc.tab_names()))
+    print("Quotes rows tint by Quote Status: amber=not sent · red=stale · "
+          "blue=sent · green=won · gray=lost.")
     return 0
 
 

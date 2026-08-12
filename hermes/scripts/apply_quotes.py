@@ -34,7 +34,7 @@ PQ_ORDER_NAME, PQ_ORDER_ID, PQ_PART, PQ_DESC, PQ_QTY = 3, 4, 5, 6, 7
 PQ_SUGG_ID, PQ_STATUS, PQ_PRICE, PQ_USE_ID, PQ_CREATE = 9, 11, 12, 13, 14
 PQ_BRAND = 19
 # Quotes tab indices. Lockstep with QUOTES_HEADERS.
-Q_QUEUED, Q_ORDER_ID, Q_STATUS = 5, 7, 8
+Q_QUEUED, Q_ORDER_ID, Q_STATUS = 7, 8, 4
 
 
 def _cell(row, idx) -> str:
@@ -57,8 +57,9 @@ def _refresh_quotes_row(sheets, quotes_tab, pq_rows, order_id) -> None:
     for i, r in enumerate(qrows):
         if _cell(r, Q_ORDER_ID) == str(order_id):
             status = "Complete" if pending == 0 else "Pending Pricing"
-            sheets.update_range(f"{quotes_tab}!F{i + 2}", [[pending]])
-            sheets.update_range(f"{quotes_tab}!I{i + 2}", [[status]])
+            # col letters lockstep with QUOTES_HEADERS: H=Queued, E=Status
+            sheets.update_range(f"{quotes_tab}!H{i + 2}", [[pending]])
+            sheets.update_range(f"{quotes_tab}!E{i + 2}", [[status]])
             return
 
 
