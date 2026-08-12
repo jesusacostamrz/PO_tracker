@@ -531,9 +531,9 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         out.order_name or ("Dry-run" if dry and partner else ""),
         out.status, len(matches), out.auto_priced, out.queued,
         out.order_id or "", gmail_msg_id,
-        "", "",  # K Quote Status, L Human Notes (human-owned; blank = Not Sent)
+        "",  # K Human Notes (human-owned)
     ]
-    if existing_row:  # upsert prior dry-run row; preserve human K:L
+    if existing_row:  # upsert prior dry-run row; preserve human K
         sheets.update_range(f"{quotes_tab}!A{existing_row}:J{existing_row}", [quotes_row[0:10]])
         _audit("sheet_upsert", f"updated Quotes row {existing_row}", "ok")
     else:

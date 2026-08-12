@@ -69,20 +69,21 @@ AUDIT_DROPDOWNS = {
     5: ["live", "dry-run"],
 }
 
-# Quotes tab: one row per RFQ. Human-owned: Quote Status + Human Notes (K:L, idx
-# 10-11) — Quote Status is how a human records what happened to the quote (sent by
-# email/WhatsApp outside Hermes's reach, won, lost); Hermes never writes it.
-# Plumbing (Odoo Quote ID, Gmail Msg ID) sits at I:J and is hidden, so on screen
-# the human columns appear right after the counts.
+# Quotes tab: one row per RFQ. Status (E) is SHARED: Hermes writes the pipeline
+# states; a human flips the same cell to Sent (quote went out by email/WhatsApp,
+# outside Hermes's reach) or Cancelled. Hermes never downgrades a Sent/Cancelled
+# status. Human Notes (K) is human-owned. Plumbing (Odoo Quote ID, Gmail Msg ID)
+# sits at I:J and is hidden.
 QUOTES_HEADERS = [
     "Received At", "Customer", "RFQ Ref", "Quote #",       # 0-3  A-D
     "Status", "Lines", "Auto-priced", "Queued",            # 4-7  E-H
     "Odoo Quote ID", "Gmail Msg ID",                       # 8-9  I-J (hidden)
-    "Quote Status", "Human Notes",                         # 10-11 K-L (human-owned)
+    "Human Notes",                                         # 10   K (human-owned)
 ]
+# ONE status column (user request 2026-08-12): Hermes writes the pipeline states,
+# a human flips the same cell to Sent / Cancelled. No separate Quote Status col.
 QUOTES_DROPDOWNS = {
-    4: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Cancelled", "Dry-run"],
-    10: ["Not Sent", "Sent", "Won", "Lost"],               # human-owned
+    4: ["Draft Created", "Pending Pricing", "Complete", "Needs Review", "Sent", "Cancelled", "Dry-run"],
 }
 QUOTES_HIDDEN_COLS = [8, 9]
 
@@ -158,7 +159,8 @@ def _reorder_orders_data(sc: SheetsClient, tab: str, new_headers: list[str]) -> 
     if not old_header or old_header == new_headers:
         return False
     end_col = chr(ord("A") + len(new_headers) - 1)
-    data = sc.read(f"{tab}!A2:{end_col}")
+    read_end = chr(ord("A") + max(len(old_header), len(new_headers)) - 1)
+    data = sc.read(f"{tab}!A2:{read_end}")
     if not data:
         return False
     pos = {name: i for i, name in enumerate(old_header)}
@@ -167,6 +169,8 @@ def _reorder_orders_data(sc: SheetsClient, tab: str, new_headers: list[str]) -> 
         for row in data
     ]
     sc.update_range(f"{tab}!A2:{end_col}{1 + len(new_data)}", new_data)
+    if len(old_header) > len(new_headers):  # blank orphan columns the new layout dropped
+        sc.clear_range(f"{tab}!{chr(ord('A') + len(new_headers))}:{read_end}")
     print(f"  [{tab}] reordered {len(new_data)} existing data row(s) to the new layout")
     return True
 
@@ -177,13 +181,14 @@ def _style_quotes(sc: SheetsClient, sid: int, n_cols: int) -> None:
     sc.clear_visual_rules(sid)
     sc.add_banding(sid, n_cols)
     # First matching rule wins: gray dead rows, green sent rows, light red the rest.
-    sc.add_conditional_rule(sid, n_cols, '=OR($E2="Cancelled", $K2="Lost")', TINT_LOST)
-    sc.add_conditional_rule(sid, n_cols, '=OR($K2="Sent", $K2="Won")', TINT_MATCHED)
+    sc.add_conditional_rule(sid, n_cols, '=$E2="Cancelled"', TINT_LOST)
+    sc.add_conditional_rule(sid, n_cols, '=$E2="Sent"', TINT_MATCHED)
     sc.add_conditional_rule(sid, n_cols, '=$A2<>""', TINT_PENDING)
+    sc.clear_validation(sid, n_cols)  # old Quote Status dropdown lingers one col past the new layout
     sc.hide_columns(sid, list(range(n_cols)), hidden=False)
     sc.hide_columns(sid, QUOTES_HIDDEN_COLS)
     sc.set_basic_filter(sid, n_cols)
-    print("  [Quotes] visuals: banding, row colors (green sent, gray cancelled/lost, "
+    print("  [Quotes] visuals: banding, row colors (green sent, gray cancelled, "
           "light red pending), plumbing hidden, filter on")
 
 
@@ -253,14 +258,14 @@ def main() -> int:
     qc.clear_body_format(qc.sheet_ids()[tabs["pricing_queue"]])
     _apply(qc, tabs["audit"], AUDIT_HEADERS, AUDIT_DROPDOWNS)  # quotes pipeline audits here
 
-    # Quotes Dashboard: KPI formulas over Quotes + Pricing Queue. Quote Status
-    # empty counts as Not Sent (new rows start blank). "S0*" = a real draft
+    # Quotes Dashboard: KPI formulas over Quotes + Pricing Queue. Single Status
+    # col E: pipeline states + human Sent/Cancelled. "S0*" = a real draft
     # (col D holds "Dry-run" on dry-run rows).
     q, pq = q_tab, tabs["pricing_queue"]
-    unsent = (f'=COUNTIFS({q}!D2:D,"S0*",{q}!K2:K,"")'
-              f'+COUNTIFS({q}!D2:D,"S0*",{q}!K2:K,"Not Sent")')
+    pending = (f'=COUNTIF({q}!D2:D,"S0*")-COUNTIF({q}!E2:E,"Sent")'
+               f'-COUNTIF({q}!E2:E,"Cancelled")')
     stale = (f'=SUMPRODUCT((LEFT({q}!D2:D,2)="S0")'
-             f'*(({q}!K2:K="")+({q}!K2:K="Not Sent"))'
+             f'*({q}!E2:E<>"Sent")*({q}!E2:E<>"Cancelled")'
              f'*IFERROR(DATEVALUE(LEFT({q}!A2:A,10))<TODAY()-{QUOTES_STALE_DAYS},0))')
     qdash_rows = [
         ["Hermes — Quotes Dashboard", ""],
@@ -269,13 +274,10 @@ def main() -> int:
         ["Draft quotes created", f'=COUNTIF({q}!D2:D,"S0*")'],
         ["Needs review", f'=COUNTIF({q}!E2:E,"Needs Review")'],
         ["", ""],
-        ["Not sent yet", unsent],
+        ["Pending (not sent)", pending],
         [f"  … stale (>{QUOTES_STALE_DAYS} days)", stale],
-        ["Sent", f'=COUNTIF({q}!K2:K,"Sent")'],
-        ["Won", f'=COUNTIF({q}!K2:K,"Won")'],
-        ["Lost", f'=COUNTIF({q}!K2:K,"Lost")'],
-        ["Win rate (won vs lost)", f'=IFERROR(TEXT(COUNTIF({q}!K2:K,"Won")'
-                                   f'/(COUNTIF({q}!K2:K,"Won")+COUNTIF({q}!K2:K,"Lost")),"0%"),"—")'],
+        ["Sent", f'=COUNTIF({q}!E2:E,"Sent")'],
+        ["Cancelled", f'=COUNTIF({q}!E2:E,"Cancelled")'],
         ["", ""],
         ["Pricing Queue pending", f"=COUNTIF('{pq}'!L2:L,\"Pending\")"],
         ["", ""],
@@ -287,7 +289,7 @@ def main() -> int:
     qc.auto_resize(qd_sid, 2)
     print(f"  [Dashboard] {len(qdash_rows)} KPI rows")
     print("Done. Quotes workbook tabs:", ", ".join(qc.tab_names()))
-    print("Quotes rows tint: green=sent/won · gray=cancelled/lost · light red=pending.")
+    print("Quotes rows tint: green=sent · gray=cancelled · light red=pending.")
     return 0
 
 

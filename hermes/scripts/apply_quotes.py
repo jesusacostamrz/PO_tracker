@@ -59,7 +59,8 @@ def _refresh_quotes_row(sheets, quotes_tab, pq_rows, order_id) -> None:
             status = "Complete" if pending == 0 else "Pending Pricing"
             # col letters lockstep with QUOTES_HEADERS: H=Queued, E=Status
             sheets.update_range(f"{quotes_tab}!H{i + 2}", [[pending]])
-            sheets.update_range(f"{quotes_tab}!E{i + 2}", [[status]])
+            if _cell(r, Q_STATUS) not in ("Sent", "Cancelled"):  # never downgrade a human status
+                sheets.update_range(f"{quotes_tab}!E{i + 2}", [[status]])
             return
 
 

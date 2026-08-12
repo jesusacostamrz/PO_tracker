@@ -93,6 +93,19 @@ class SheetsClient:
             )
         )
 
+    def clear_range(self, a1_range: str) -> dict:
+        """Blank the VALUES in a range (layout migrations only — rows/tabs stay)."""
+        return _execute(
+            self.service.spreadsheets().values()
+            .clear(spreadsheetId=self.spreadsheet_id, range=a1_range, body={})
+        )
+
+    def clear_validation(self, sheet_id: int, col_index: int) -> dict:
+        """Drop a column's data-validation dropdown (leftover after a column move)."""
+        return self._batch([{"setDataValidation": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                      "startColumnIndex": col_index, "endColumnIndex": col_index + 1}}}])
+
     # ---- structure (additive: create/format tabs; never deletes) ----
     def _batch(self, requests: list[dict]) -> dict:
         return _execute(
@@ -222,11 +235,18 @@ class SheetsClient:
         }])
 
     def add_conditional_rule(self, sheet_id: int, n_cols: int, formula: str, rgb) -> dict:
-        """Tint whole data rows (row 2+) where a CUSTOM_FORMULA is true (e.g. '=$H2=\"Needs Review\"')."""
+        """Tint whole data rows (row 2+) where a CUSTOM_FORMULA is true (e.g. '=$H2=\"Needs Review\"').
+
+        Appended at the END of the rule list: Sheets applies the topmost matching
+        rule, so callers add rules in priority order (first added wins). Inserting
+        at index 0 (the old behavior) silently reversed every caller's priority."""
+        sheet = next((s for s in self.meta().get("sheets", [])
+                      if s["properties"]["sheetId"] == sheet_id), None)
+        idx = len((sheet or {}).get("conditionalFormats", []))
         r, g, b = rgb
         return self._batch([{
             "addConditionalFormatRule": {
-                "index": 0,
+                "index": idx,
                 "rule": {
                     "ranges": [{"sheetId": sheet_id, "startRowIndex": 1,
                                 "startColumnIndex": 0, "endColumnIndex": n_cols}],

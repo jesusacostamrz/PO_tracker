@@ -103,9 +103,10 @@ Three layers, deliberately separated:
   workbook (`sheets.quotes_spreadsheet_id` / `SHEETS_QUOTES_SPREADSHEET_ID`), not in
   the PO Tracker. Quotes-tab reprocessing is blocked only by a row with an Odoo Quote ID
   (dry-run and Needs-Review rows are upserted). Pricing Queue rows are written on live
-  runs only; human-owned cells are Quotes cols K:L (Quote Status — how a human records
-  sent/won/lost, since quotes go out by email/WhatsApp beyond Hermes's reach — and
-  Human Notes) and Pricing Queue cols M:P. Column
+  runs only. The Quotes Status column (E) is SHARED: Hermes writes the pipeline states
+  and a human flips the same cell to Sent/Cancelled (quotes go out by email/WhatsApp
+  beyond Hermes's reach); Hermes never downgrades a Sent/Cancelled status. Human-owned
+  cells are Quotes col K (Human Notes) and Pricing Queue cols M:P. Column
   constants in `core/quote_actions.py` and `scripts/apply_quotes.py` MUST stay in
   lockstep with `QUOTES_HEADERS`/`PQ_HEADERS` in `scripts/setup_sheet.py`. Products ARE
   now auto-created on live RFQ intake for any queued line with no suggested match (price
