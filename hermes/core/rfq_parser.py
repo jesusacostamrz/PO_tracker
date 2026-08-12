@@ -121,11 +121,11 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
                          "the image(s) may show the items themselves. "
                          "List each requested item once, even if it appears in both.\n\n" + blob)
         result = llm.vision_json(system=system, user_text=user_text,
-                                 image_data_urls=image_urls[:4], max_tokens=8000)
+                                 image_data_urls=image_urls[:4], max_tokens=16000)
         result["_source"] = "vision+text" if texts else "vision"
     elif texts:
         blob = "\n\n".join(texts)[:_MAX_TEXT_CHARS]
-        result = llm.chat_json(system=system, user="RFQ content:\n\n" + blob, max_tokens=8000)
+        result = llm.chat_json(system=system, user="RFQ content:\n\n" + blob, max_tokens=16000)
         result["_source"] = "text"
     else:
         result = {"customer_name": None, "rfq_ref": None, "line_items": [], "_source": "empty"}
