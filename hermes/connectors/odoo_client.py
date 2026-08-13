@@ -259,7 +259,9 @@ class OdooClient:
         return out
 
     def purchase_orders_by_origin(self, origin: str) -> list[dict]:
-        return self.search_read("purchase.order", [["origin", "=", origin]],
+        # cancelled RFQs don't count — a cancelled draft must not block re-creating one
+        return self.search_read("purchase.order",
+                                [["origin", "=", origin], ["state", "!=", "cancel"]],
                                 ["name", "partner_id", "state"])
 
     def create_draft_rfq(self, partner_id: int, origin: str, lines: list[dict]) -> int:
