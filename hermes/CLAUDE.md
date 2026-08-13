@@ -85,8 +85,9 @@ Three layers, deliberately separated:
     `max_discount_pct` (15) — above the cap the draft is created at LIST and flagged
     for approval (chatter + audit), never auto-granted. USD lists quoting into MXN use
     the official Odoo rate + `mxn_fx_surcharge` (0.5). Products auto-create on demand
-    (name = the CLEANED type designation — list spacing normalized; item# in the sale
-    description) at **list_price 0 on purpose**: a 0-price product requeues on the next
+    (user rule 2026-08-13: name = the ITEM NUMBER from the list; description_sale =
+    the CLEANED type designation — list spacing normalized) at **list_price 0 on
+    purpose**: a 0-price product requeues on the next
     RFQ and reprices from the current list, never a stale Odoo price. An existing
     catalog product under either identifier is reused, never duplicated; a typo'd item#
     is rescued by the type inside the description (joined-token windows, longest wins).

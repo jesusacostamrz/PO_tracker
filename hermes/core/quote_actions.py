@@ -264,10 +264,10 @@ def _create_missing_products(odoo: OdooClient, cfg: dict, matches: list[LineMatc
             # Product/Description columns). Description goes to description_sale.
             desc = m.line.get("description") or ""
             pbrec = m.line.get("_pricebook")
-            if pbrec:  # pricebook hit: name = distributor TYPE designation; item# kept in the description
-                name = pbrec.get("type") or part or pbrec.get("item") or "Unknown item"
-                vendor_item = f"{pbrec.get('vendor') or ''} {pbrec.get('item') or ''}".strip()
-                desc = " | ".join(x for x in (desc, vendor_item) if x)
+            if pbrec:  # pricebook hit — user rule 2026-08-13: product name = the
+                # ITEM NUMBER from the list; description = the type description
+                name = pbrec.get("item") or part or pbrec.get("type") or "Unknown item"
+                desc = pbrec.get("type") or desc
                 # list_price stays 0 ON PURPOSE: a 0-price product requeues on the
                 # next RFQ and reprices from the CURRENT list — never a stale price
                 price = 0.0
@@ -292,10 +292,10 @@ def _image_candidates(odoo: OdooClient, matches: list[LineMatch],
         pid = (m.product or {}).get("id")
         if pid and pid not in cand:
             pb = m.line.get("_pricebook") or {}
-            # pricebook lines search by the TYPE designation (the cited part#
-            # may be a typo — that's often WHY it fell to the pricebook), and
-            # only on the distributor's own site when one is configured
-            cand[pid] = (pb.get("type") or m.line.get("part_number") or "",
+            # pricebook lines search by the list's ITEM NUMBER (unique; the
+            # customer's cited part# may be a typo — that's often WHY it fell
+            # to the pricebook), only on the brand's own site when configured
+            cand[pid] = (pb.get("item") or pb.get("type") or m.line.get("part_number") or "",
                          m.line.get("description") or "",
                          m.line.get("manufacturer") or "",
                          pb.get("image_site"))

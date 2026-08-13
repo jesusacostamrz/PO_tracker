@@ -174,7 +174,7 @@ def apply_pricebook(matches, products: list[dict], cfg: dict) -> int:
                                     "vendor": pb.vendor_name, "image_site": pb.image_site}
             if not m.line.get("manufacturer"):
                 m.line["manufacturer"] = pb.vendor_name  # image-search hint
-            prod = by_code.get(norm_code(rec["type"])) or by_code.get(norm_code(rec["item"]))
+            prod = by_code.get(norm_code(rec["item"])) or by_code.get(norm_code(rec["type"]))
             if prod:
                 m.status, m.product, m.score = "matched", prod, 100.0
                 m.reason = f"pricebook {pb.key}: existing product"
