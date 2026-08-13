@@ -21,6 +21,13 @@ from core.product_matcher import norm_code
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+def _clean_type(s) -> str:
+    """Distributor lists have sloppy spacing ('NS 35/ 7,5', 'FBSK  3-7,5') —
+    normalize to the official designation for product names."""
+    s = re.sub(r"\s*/\s*", "/", str(s or ""))
+    return re.sub(r"\s{2,}", " ", s).strip()
+
+
 def _num(v) -> float | None:
     try:
         return float(str(v).replace(",", "").replace("$", "").strip())
@@ -83,27 +90,40 @@ class Pricebook:
         self.vendor_name = fcfg.get("vendor_name") or key
         self.currency = str(fcfg.get("currency") or "USD").upper()
         self.mxn_fx_surcharge = float(fcfg.get("mxn_fx_surcharge") or 0)
+        self.image_site = str(fcfg.get("image_site") or "").strip() or None
         self.index: dict[str, dict] = {}
         for item, type_, lst, cost in rows:
-            rec = {"item": item, "type": type_, "list": lst, "cost": cost}
+            rec = {"item": item, "type": _clean_type(type_), "list": lst, "cost": cost}
             for k in (norm_code(item), norm_code(type_)):
                 if k:
                     self.index.setdefault(k, rec)
 
     def lookup(self, part_number, description="") -> dict | None:
-        """Exact normalized match on the RFQ part# (against item OR type), else a
-        single unambiguous part-number-looking token inside the description."""
+        """Exact normalized match on the RFQ part# (against item OR type), else an
+        unambiguous type/item inside the description. Multi-word type designations
+        ("FBS 10-5 BU") only exist as JOINED adjacent-token windows — longest
+        window wins, so a full type beats its own prefix ("FBS 10-5" is a
+        DIFFERENT product). This also rescues lines whose cited item# is a typo
+        but whose description carries the real type."""
         code = norm_code(part_number)
         if code and code in self.index:
             return self.index[code]
-        hits: dict[str, dict] = {}
         # no comma in the split — PXC types embed commas ("DFK-2,8"); edge
         # punctuation is stripped per token instead
-        for tok in re.split(r"[\s;:()\"']+", str(description or "")):
-            t = norm_code(tok.strip(",.;:"))
-            if len(t) >= 5 and any(c.isdigit() for c in t) and t in self.index:
-                hits[self.index[t]["item"] or t] = self.index[t]
-        return next(iter(hits.values())) if len(hits) == 1 else None
+        toks = [t for t in (tok.strip(",.;:")
+                            for tok in re.split(r"[\s;:()\[\]\"']+", str(description or "")))
+                if norm_code(t)]
+        for size in (4, 3, 2, 1):
+            hits: dict[str, dict] = {}
+            for i in range(len(toks) - size + 1):
+                t = norm_code("".join(toks[i:i + size]))
+                if len(t) >= 5 and any(c.isdigit() for c in t) and t in self.index:
+                    hits[self.index[t]["item"] or t] = self.index[t]
+            if len(hits) == 1:
+                return next(iter(hits.values()))
+            if len(hits) > 1:
+                return None  # two different catalog parts at the same length -> ambiguous
+        return None
 
 
 _memo: dict[tuple, Pricebook] = {}  # (key, path, mtime, colsig) -> built book
@@ -151,7 +171,7 @@ def apply_pricebook(matches, products: list[dict], cfg: dict) -> int:
                 continue
             m.line["_pricebook"] = {**rec, "currency": pb.currency,
                                     "mxn_fx_surcharge": pb.mxn_fx_surcharge,
-                                    "vendor": pb.vendor_name}
+                                    "vendor": pb.vendor_name, "image_site": pb.image_site}
             if not m.line.get("manufacturer"):
                 m.line["manufacturer"] = pb.vendor_name  # image-search hint
             prod = by_code.get(norm_code(rec["type"])) or by_code.get(norm_code(rec["item"]))

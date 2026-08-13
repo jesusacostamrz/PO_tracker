@@ -124,6 +124,7 @@ pricebook:
       vendor_name: "Phoenix Contact"
       currency: USD
       mxn_fx_surcharge: 0.5        # quote MXN at official USD rate + 0.5 (user rule 2026-08-13)
+      image_site: phoenixcontact.com  # product images ONLY from their site (no off-site fallback)
       header_row: 1
       columns:                     # header CELL TEXT (exact, case-insensitive)
         item: "Item number"        # article number (e.g. 706016)

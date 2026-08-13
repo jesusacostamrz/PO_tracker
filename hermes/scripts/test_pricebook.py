@@ -18,7 +18,10 @@ FCFG = {"vendor_name": "Phoenix Contact", "currency": "USD", "mxn_fx_surcharge":
 
 ROWS = [["706016", "DFK-2,8", 2.22, 1.37],
         ["706029", "DFK-2,8 BU", 2.30, 1.42],
-        ["1234567", "UT 2,5", 100.0, 61.7]]
+        ["1234567", "UT 2,5", 100.0, 61.7],
+        ["3030213", "FBS 10-5", 5.0, 3.09],
+        ["3036916", "FBS 10-5 BU", 5.3, 3.27],
+        ["801733", "NS 35/ 7,5 PERF 2000MM", 4.13, 2.55]]
 
 
 def _lm(part=None, desc="", status="queue"):
@@ -37,6 +40,15 @@ def main() -> int:
     assert pb.lookup("999999") is None
     # two different catalog hits in one description -> ambiguous -> None
     assert pb.lookup(None, "706016 o 706029") is None
+    # multi-word type in the description rescues a TYPO'D item# (S03189 case:
+    # customer wrote 3039616 for FBS 10-5 BU = 3036916); longest window wins
+    # over its own prefix (FBS 10-5 is a DIFFERENT product)
+    assert pb.lookup("3039616", "FBS 10-5 BU - Puente enchufable")["item"] == "3036916"
+    assert pb.lookup(None, "[3039616] FBS 10-5 BU - Puente enchufable")["item"] == "3036916"
+    assert pb.lookup(None, "Puente FBS 10-5 de 5 polos")["item"] == "3030213"
+    # sloppy list spacing normalized for the product name; lookup still hits
+    assert pb.lookup("801733")["type"] == "NS 35/7,5 PERF 2000MM"
+    assert pb.lookup("NS 35/7,5 PERF 2000MM")["item"] == "801733"
 
     # apply_pricebook: hit stashes _pricebook; existing catalog product is reused
     cfg = {"pricebook": {"files": {}}}  # loaded books injected below via monkey-ish path

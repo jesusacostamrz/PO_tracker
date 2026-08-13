@@ -85,9 +85,14 @@ Three layers, deliberately separated:
     `max_discount_pct` (15) — above the cap the draft is created at LIST and flagged
     for approval (chatter + audit), never auto-granted. USD lists quoting into MXN use
     the official Odoo rate + `mxn_fx_surcharge` (0.5). Products auto-create on demand
-    (name = type designation, item# in the sale description); an existing catalog
-    product under either identifier is reused, never duplicated. The xlsx is cached as
-    JSON next to it (mtime-keyed); `pricebooks/` is gitignored (private pricing data).
+    (name = the CLEANED type designation — list spacing normalized; item# in the sale
+    description) at **list_price 0 on purpose**: a 0-price product requeues on the next
+    RFQ and reprices from the current list, never a stale Odoo price. An existing
+    catalog product under either identifier is reused, never duplicated; a typo'd item#
+    is rescued by the type inside the description (joined-token windows, longest wins).
+    Product images come ONLY from the brand's `image_site` when configured (blank beats
+    wrong). The xlsx is cached as JSON next to it (mtime+column-mapping keyed);
+    `pricebooks/` is gitignored (private pricing data).
 - `scripts/` — thin CLI entrypoints (`process_po.py` single PDF, `intake.py` Gmail batch).
 
 ## Invariants — do not violate

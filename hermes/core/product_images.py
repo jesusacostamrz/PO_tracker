@@ -38,7 +38,10 @@ def _og_image_url(html: str) -> str | None:
 
 
 def find_image_bytes(part_number: str, manufacturer: str, description: str, search,
-                     page_url: str | None = None) -> bytes | None:
+                     page_url: str | None = None, only_site: str | None = None) -> bytes | None:
+    """only_site: restrict the search to that domain (manufacturer sites like
+    phoenixcontact.com host every product image) — no off-site fallback; a
+    missing image beats a wrong one."""
     # A page already validated for this exact part (e.g. the price-research
     # source) is the best image source — same product guaranteed, no extra
     # search call. Search engines below are the fallback.
@@ -69,8 +72,10 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         if stripped != keys[0] and len(stripped) >= 6:
             keys.append(stripped)
         queries = [part or subject]
-        if part and mfr:
+        if part and mfr and not only_site:
             queries.append(f"{part} {mfr}")
+        if only_site:
+            queries = [f"{q} site:{only_site}" for q in queries]
         # short part numbers (e.g. "MHL-4" -> "mhl4") match far too much of the
         # web — when the key is short and the brand is known, the hit must
         # mention the brand as well
@@ -79,6 +84,8 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
             for q in queries:
                 for country in ("MX", "US"):
                     for img in search.image_urls(q, country=country):
+                        if only_site and only_site.lower() not in img["link"].lower():
+                            continue  # site: is advisory to Google; enforce it
                         hay = re.sub(r"[^a-z0-9]", "", f"{img['title']} {img['link']}".lower())
                         if key and key not in hay:
                             continue
@@ -90,7 +97,10 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         return None
 
     try:
-        result = search.web_search(f"Pagina de producto para: {subject}", country="MX")
+        q = f"Pagina de producto para: {subject}"
+        if only_site:
+            q += f" site:{only_site}"
+        result = search.web_search(q, country="MX")
     except Exception as e:
         print(f"WARN product_images: search failed: {e}")
         return None
@@ -98,6 +108,8 @@ def find_image_bytes(part_number: str, manufacturer: str, description: str, sear
         return None
 
     for page_url in (result.get("sources") or [])[:3]:
+        if only_site and only_site.lower() not in page_url.lower():
+            continue
         img_bytes = _try_page(page_url)
         if img_bytes:
             return img_bytes

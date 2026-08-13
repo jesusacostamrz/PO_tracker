@@ -268,9 +268,13 @@ def _create_missing_products(odoo: OdooClient, cfg: dict, matches: list[LineMatc
                 name = pbrec.get("type") or part or pbrec.get("item") or "Unknown item"
                 vendor_item = f"{pbrec.get('vendor') or ''} {pbrec.get('item') or ''}".strip()
                 desc = " | ".join(x for x in (desc, vendor_item) if x)
+                # list_price stays 0 ON PURPOSE: a 0-price product requeues on the
+                # next RFQ and reprices from the CURRENT list — never a stale price
+                price = 0.0
             else:
                 name = part or desc or "Unknown item"
-            pid = odoo.create_product(name, list_price=(price_of(m) if price_of else 0.0),
+                price = price_of(m) if price_of else 0.0
+            pid = odoo.create_product(name, list_price=price,
                                       description=desc if (part or pbrec) else "", extra=extra_vals)
             created_by_key[key] = (pid, name)
             created_products.append((pid, name, part, desc, m.line.get("manufacturer") or ""))
@@ -283,13 +287,18 @@ def _image_candidates(odoo: OdooClient, matches: list[LineMatch],
                       created_ids: set[int]) -> dict[int, tuple[str, str, str]]:
     """pid -> (part, desc, mfr) for quote products still needing an image:
     auto-created ones always, existing catalog products only when image_128 is empty."""
-    cand: dict[int, tuple[str, str, str]] = {}
+    cand: dict[int, tuple[str, str, str, str | None]] = {}
     for m in matches:
         pid = (m.product or {}).get("id")
         if pid and pid not in cand:
-            cand[pid] = (m.line.get("part_number") or "",
+            pb = m.line.get("_pricebook") or {}
+            # pricebook lines search by the TYPE designation (the cited part#
+            # may be a typo — that's often WHY it fell to the pricebook), and
+            # only on the distributor's own site when one is configured
+            cand[pid] = (pb.get("type") or m.line.get("part_number") or "",
                          m.line.get("description") or "",
-                         m.line.get("manufacturer") or "")
+                         m.line.get("manufacturer") or "",
+                         pb.get("image_site"))
     existing_ids = [p for p in cand if p not in created_ids]
     have_img = {rec["id"] for rec in odoo.search_read(
         "product.product", [["id", "in", existing_ids]], ["image_128"])
@@ -306,9 +315,10 @@ def _attach_images(odoo: OdooClient, img_cand: dict, search, audit,
         from core.product_images import find_image_bytes
     except ImportError:
         return
-    for pid, (part, desc, mfr) in img_cand.items():
+    for pid, (part, desc, mfr, site) in img_cand.items():
         try:
-            img = find_image_bytes(part, mfr, desc, search, page_url=(offer_urls or {}).get(pid))
+            img = find_image_bytes(part, mfr, desc, search,
+                                   page_url=(offer_urls or {}).get(pid), only_site=site)
             if img and odoo.set_product_image(pid, img):
                 audit("product_image", f"attached image to product {pid}", "ok")
         except Exception as exc:

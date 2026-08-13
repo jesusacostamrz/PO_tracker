@@ -187,6 +187,28 @@ assert pi.find_image_bytes("MHL-4", "FABCO", "valvula", StubSerperShortPart()) =
 assert pi.find_image_bytes("MHL-4", "", "valvula", StubSerperShortPart()) == b"BAD"  # no brand known -> old behavior
 print("OK find_image_bytes short part requires brand in hit")
 
+# only_site image restriction: off-site hits skipped even when they mention the
+# part; queries carry site:<domain>; nothing on-site -> None (blank beats wrong)
+class StubSerperImgSite:
+    kind = "serper"
+    def __init__(self, links):
+        self.links, self.queries = links, []
+    def image_urls(self, query, country="MX", limit=8):
+        self.queries.append(query)
+        return [{"url": f"https://img/{i}.jpg", "title": "FBS 10-5 BU puente", "link": l}
+                for i, l in enumerate(self.links)]
+
+pi._download_image = lambda url: b"PXC" if url else None
+s = StubSerperImgSite(["https://mercadolibre.com/fbs-10-5-bu",
+                       "https://www.phoenixcontact.com/es-mx/productos/fbs-10-5-bu"])
+assert pi.find_image_bytes("FBS 10-5 BU", "Phoenix Contact", "puente", s,
+                           only_site="phoenixcontact.com") == b"PXC"
+assert all("site:phoenixcontact.com" in q for q in s.queries)
+s2 = StubSerperImgSite(["https://mercadolibre.com/fbs-10-5-bu"])
+assert pi.find_image_bytes("FBS 10-5 BU", "Phoenix Contact", "puente", s2,
+                           only_site="phoenixcontact.com") is None
+print("OK find_image_bytes only_site restriction")
+
 # only_site: queries restricted to the named site; off-site priced offers demoted
 class StubSerperSite:
     kind = "serper"
