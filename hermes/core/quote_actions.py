@@ -185,6 +185,22 @@ def _cost_sale_price(m: LineMatch, margin_pct, default_pct, fx: float = 1.0) -> 
     return round(c * fx / (1 - pct / 100.0), 2)
 
 
+def _pricebook_sale(pb: dict, fx: float | None, discount_pct, margin_pct) -> float | None:
+    """Distributor pricebook line: quoted at the LIST price as-is — no extra
+    margin unless the email instructs one (then sale = list*fx/(1-m), margin on
+    the selling price as everywhere); an email-granted discount multiplies
+    (10% -> x0.9). Caller has already capped/None'd an over-limit discount."""
+    lst = pb.get("list")
+    if not lst or lst <= 0 or fx is None:
+        return None
+    price = lst * fx
+    if margin_pct is not None and 0 <= margin_pct < 100:
+        price /= (1 - margin_pct / 100.0)
+    if discount_pct and 0 < discount_pct < 100:
+        price *= (1 - discount_pct / 100.0)
+    return round(price, 2)
+
+
 def _quote_currency(odoo: OdooClient, partner_id: int) -> str | None:
     """The currency the customer's draft quote will use = their Odoo pricelist's."""
     p = odoo.search_read("res.partner", [["id", "=", partner_id]], ["property_product_pricelist"])
@@ -247,9 +263,15 @@ def _create_missing_products(odoo: OdooClient, cfg: dict, matches: list[LineMatc
             # (no default_code — Odoo would display "[code] name" and mix the
             # Product/Description columns). Description goes to description_sale.
             desc = m.line.get("description") or ""
-            name = part or desc or "Unknown item"
+            pbrec = m.line.get("_pricebook")
+            if pbrec:  # pricebook hit: name = distributor TYPE designation; item# kept in the description
+                name = pbrec.get("type") or part or pbrec.get("item") or "Unknown item"
+                vendor_item = f"{pbrec.get('vendor') or ''} {pbrec.get('item') or ''}".strip()
+                desc = " | ".join(x for x in (desc, vendor_item) if x)
+            else:
+                name = part or desc or "Unknown item"
             pid = odoo.create_product(name, list_price=(price_of(m) if price_of else 0.0),
-                                      description=desc if part else "", extra=extra_vals)
+                                      description=desc if (part or pbrec) else "", extra=extra_vals)
             created_by_key[key] = (pid, name)
             created_products.append((pid, name, part, desc, m.line.get("manufacturer") or ""))
             audit("odoo_create_product", f"created product {pid} '{name[:40]}' (part {part or '-'})", "ok")
@@ -331,14 +353,37 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
         return out
 
     fx_map: dict = {}  # cost currency -> quote-currency factor, filled once the partner is known
+    qstate: dict = {}  # {"ccy": quote currency} once the partner's pricelist is read
+
+    # email-granted discount is capped: above the cap NOTHING is auto-granted —
+    # the quote is created at LIST price and flagged for approval instead
+    max_disc = cfg.get("pricebook", {}).get("max_discount_pct", 15)
+    disc_requested = rfq.get("discount_pct")
+    over_disc = disc_requested is not None and disc_requested > max_disc
+    disc_notes: list[str] = []  # surfaced in out.notes + chatter on the draft
+    if over_disc:
+        rfq["discount_pct"] = None
+        _audit("discount", f"requested discount {disc_requested:g}% exceeds max {max_disc}% "
+                           f"— quoting at list price, approval required", "review")
+        disc_notes.append(f"Requested discount {disc_requested:g}% exceeds the {max_disc}% cap — "
+                          f"quoted at LIST price; the discount needs approval.")
 
     def _ccy(m):  # a line's own currency wins; documents can mix USD and MXN lines
+        pb = m.line.get("_pricebook")
+        if pb:
+            return pb.get("currency")
         return m.line.get("cost_currency") or rfq.get("currency")
 
     def sale_of(m):
         f = fx_map.get(_ccy(m), 1.0)
         if f is None:  # unknown currency/rate — refuse to price blind
             return None
+        pb = m.line.get("_pricebook")
+        if pb:
+            # user rule 2026-08-13: quote MXN at the official USD rate + surcharge (0.5)
+            if f != 1.0 and qstate.get("ccy") == "MXN" and pb.get("currency") == "USD":
+                f += pb.get("mxn_fx_surcharge") or 0
+            return _pricebook_sale(pb, f, rfq.get("discount_pct"), rfq.get("margin_pct"))
         return _cost_sale_price(m, rfq.get("margin_pct"),
                                 cfg.get("pricebook", {}).get("default_margin_pct", 30), f)
 
@@ -401,23 +446,40 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                 _audit("web_pricing", f"priced {len(priced)}/{len(priced) + len(queue)} line(s) "
                                       f"from {site} (explicit instruction)", "ok")
         # AUTO lines can carry a supplier cost too (their price_unit override
-        # below uses sale_of) — their currencies need converting just like costed
-        cost_ccys = {_ccy(m) for m in auto + costed if m.line.get("unit_cost")}
+        # below uses sale_of) — their currencies need converting just like costed;
+        # pricebook lines (USD list prices) need conversion the same way
+        cost_ccys = {_ccy(m) for m in auto + costed
+                     if m.line.get("unit_cost") or m.line.get("_pricebook")}
         if cost_ccys:
             # supplier costs are in the DOCUMENT's currency (possibly mixed per
             # line); the quote uses the customer's pricelist currency — convert
             # each line, or refuse to price the ones we can't convert
             quote_ccy = _quote_currency(odoo, partner["id"])
+            qstate["ccy"] = quote_ccy
             for c in cost_ccys:
                 fx_map[c] = _fx_factor(odoo, c, quote_ccy)
                 if fx_map[c] not in (None, 1.0):
                     _audit("currency", f"supplier costs {c} -> {quote_ccy} at rate {fx_map[c]:.6f}", "ok")
             bad = [m for m in costed if sale_of(m) is None]
-            if bad:
-                _audit("currency", f"can't convert supplier costs to quote currency ({quote_ccy or '?'}) "
-                                   f"— {len(bad)} line(s) queued unpriced", "error")
-                queue, costed = queue + bad, [m for m in costed if sale_of(m) is not None]
+            # a pricebook line matched to an EXISTING product must not silently
+            # fall back to the (possibly stale) catalog price when fx is unknown
+            # — requeue it exactly like an unconvertible costed line
+            bad_auto = [m for m in auto if m.line.get("_pricebook") and sale_of(m) is None]
+            if bad or bad_auto:
+                _audit("currency", f"can't convert costs to quote currency ({quote_ccy or '?'}) "
+                                   f"— {len(bad) + len(bad_auto)} line(s) queued unpriced", "error")
+                queue = queue + bad + bad_auto
+                costed = [m for m in costed if sale_of(m) is not None]
+                auto = [m for m in auto if m not in bad_auto]
                 out.auto_priced, out.queued = len(auto) + len(costed), len(queue)
+        # an in-cap discount only reaches pricebook lines — leaving other priced
+        # lines at full price with no trace misleads the salesperson
+        if rfq.get("discount_pct") and (no_disc := [m for m in auto + costed
+                                                    if not m.line.get("_pricebook")]):
+            _audit("discount", f"discount {rfq['discount_pct']:g}% applies to pricebook lines only "
+                               f"— {len(no_disc)} line(s) priced without it", "review")
+            disc_notes.append(f"Discount {rfq['discount_pct']:g}% was applied to pricebook lines only; "
+                              f"{len(no_disc)} line(s) are priced without it — review before sending.")
         # an explicit cost+margin instruction overrides the catalog price
         auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                        **({"price_unit": p} if (p := sale_of(m)) is not None else {})}
@@ -449,6 +511,11 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
             out.order_id = odoo.create_draft_quote(partner["id"], lines, client_ref=rfq_ref)
             out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""
             out.status = "Pending Pricing" if queue else "Draft Created"
+            for note in disc_notes:  # discount caveats: the human must see them on the draft itself
+                try:
+                    odoo.post_chatter(out.order_id, f"Hermes: {note}")
+                except Exception:
+                    pass
             _audit("odoo_create_quote",
                    f"created draft {out.order_name} for {partner['name']} "
                    f"({len(auto_lines)} auto, {len(costed_lines)} cost+margin, "
@@ -539,6 +606,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
     else:
         sheets.append_row(quotes_tab, quotes_row)
         _audit("sheet_upsert", "appended Quotes row", "ok")
+    for n in disc_notes:
+        out.log(n)
     return _flush(out)
 
 

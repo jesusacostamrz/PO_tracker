@@ -16,3 +16,6 @@ logs/
 state/
 *.token.json
 gmail_token.json
+
+# Distributor pricebooks — private pricing data, never commit
+pricebooks/

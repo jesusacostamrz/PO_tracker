@@ -112,6 +112,24 @@ pricebook:
   default_margin_pct: 30
   # Pricelist IMPORT markup (import_pricelist.py): sale = cost * (1 + pct/100).
   default_markup_pct: 25
+  # Email-granted customer discount cap (quotes pipeline): above this the draft
+  # is created at LIST price and flagged for approval — never auto-granted.
+  max_discount_pct: 15
+  # Local pricebooks (core/pricebook.py): big distributor lists the RFQ pipeline
+  # reads directly — NOT imported into Odoo; products auto-create when quoted.
+  # Quoted at the LIST price as-is (no extra margin unless the email says so).
+  files:
+    phoenix:
+      path: "pricebooks/pxc-2026.xlsx"
+      vendor_name: "Phoenix Contact"
+      currency: USD
+      mxn_fx_surcharge: 0.5        # quote MXN at official USD rate + 0.5 (user rule 2026-08-13)
+      header_row: 1
+      columns:                     # header CELL TEXT (exact, case-insensitive)
+        item: "Item number"        # article number (e.g. 706016)
+        type: "Type description"   # model designation (e.g. DFK-2,8) -> product NAME
+        list: "2026 PL"            # customer list price — quoted as-is
+        cost: "2026 Distribuidor"  # our distributor cost (reference)
   brands:
     acme:                              # key used as --brand acme
       vendor_name: "ACME Distribution" # res.partner created/reused as the vendor

@@ -37,7 +37,7 @@ python scripts/intake_rfq.py [--live] [--max N] [--watch SECONDS]        # Gmail
 python scripts/apply_quotes.py [--live]              # apply human pricing from the Pricing Queue tab
 python scripts/import_pricelist.py --brand <key> <lista.xlsx> [--live]   # distributor price list -> Odoo catalog
 # offline self-checks (no network): test_rfq_gmail, test_rfq_parse, test_product_match,
-#   test_pricelist, test_web_pricing
+#   test_pricelist, test_web_pricing, test_pricebook
 ```
 
 There is no test framework, linter, or build step — `scripts/test_*.py` are hand-run
@@ -77,6 +77,17 @@ Three layers, deliberately separated:
     to `description_sale`. `import_pricelist.py` upserts distributor Excel lists into
     the catalog (dedup on part# in name or internal reference; cost →
     `product.supplierinfo`; sale price = cost × brand markup from `pricebook:` config).
+  - `pricebook.py` — LOCAL distributor pricebooks (`pricebook.files:` config, e.g. the
+    72k-row Phoenix Contact list): big xlsx lists consulted at match time instead of
+    being imported into Odoo. A queued RFQ line that hits one (by item number OR type
+    designation, both indexed) is priced at the LIST price — no extra margin unless the
+    email instructs one; an email-granted discount multiplies (10% → ×0.9), capped by
+    `max_discount_pct` (15) — above the cap the draft is created at LIST and flagged
+    for approval (chatter + audit), never auto-granted. USD lists quoting into MXN use
+    the official Odoo rate + `mxn_fx_surcharge` (0.5). Products auto-create on demand
+    (name = type designation, item# in the sale description); an existing catalog
+    product under either identifier is reused, never duplicated. The xlsx is cached as
+    JSON next to it (mtime-keyed); `pricebooks/` is gitignored (private pricing data).
 - `scripts/` — thin CLI entrypoints (`process_po.py` single PDF, `intake.py` Gmail batch).
 
 ## Invariants — do not violate

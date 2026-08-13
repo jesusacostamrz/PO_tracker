@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.config import load_config                    # noqa: E402
 from core.rfq_parser import parse_rfq                  # noqa: E402
 from core.product_matcher import match_lines           # noqa: E402
+from core.pricebook import apply_pricebook             # noqa: E402
 from core.quote_actions import apply_rfq               # noqa: E402
 from connectors.llm_client import LLMClient            # noqa: E402
 from connectors.gmail_client import GmailClient, GmailError      # noqa: E402
@@ -76,6 +77,7 @@ def _process_message(gm, odoo, sheets, cfg, llm, products, msg_id, dry, mark_rea
         return
 
     matches = match_lines(rfq["line_items"], products, cfg["rfq"]["match"])
+    apply_pricebook(matches, products, cfg)
     pdfs = [(fn, data) for kind, fn, data in sources if kind == "pdf"]
     out = apply_rfq(odoo, sheets, cfg, rfq, matches, gmail_msg_id=msg_id, dry_run=dry,
                     search=search, llm=llm, attachments=pdfs)

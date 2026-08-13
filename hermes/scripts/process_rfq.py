@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.config import load_config                    # noqa: E402
 from core.rfq_parser import parse_rfq                  # noqa: E402
 from core.product_matcher import match_lines           # noqa: E402
+from core.pricebook import apply_pricebook             # noqa: E402
 from core.quote_actions import apply_rfq               # noqa: E402
 from connectors.llm_client import LLMClient            # noqa: E402
 from connectors.odoo_client import OdooClient, OdooError    # noqa: E402
@@ -67,6 +68,7 @@ def main() -> int:
 
     products = odoo.all_products()
     matches = match_lines(rfq["line_items"], products, cfg["rfq"]["match"])
+    apply_pricebook(matches, products, cfg)
     for m in matches:
         tag = "AUTO " if m.status == "matched" else "QUEUE"
         want = m.line.get("part_number") or m.line.get("description", "")[:40]

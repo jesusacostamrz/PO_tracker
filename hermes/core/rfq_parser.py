@@ -42,6 +42,7 @@ Return ONLY a JSON object (null where absent):
   "customer_name": string,   // the requesting company, if identifiable; else null
   "rfq_ref": string,         // the customer's RFQ/requisition number, if any; else null
   "margin_pct": number,      // profit margin % EXPLICITLY instructed in the email body (e.g. "add 40%"); else null
+  "discount_pct": number,    // customer discount % EXPLICITLY granted in the email body ("apply 10% discount", "con 10% de descuento"); else null
   "price_source_site": string, // web domain the body EXPLICITLY orders us to take PRICES from ("include the price from <site>", "con precios de <sitio>"); a link given only as reference or for images is NOT a pricing instruction -> null
   "currency": string,        // ISO code (MXN, USD, ...) of the unit prices ON THE DOCUMENT — from an explicit currency label/legend; null if prices absent or currency not shown
   "line_items": [
@@ -99,6 +100,7 @@ no guessing. Spanish/English. Ignore signatures and disclaimers; quoted earlier 
 in the thread count as salesperson text. Return ONLY JSON:
 {"customer_name": string|null,    // "quote for X" / "cotizacion para X" / subject "RFQ X" -> X, verbatim (even short/lowercase)
  "margin_pct": number|null,       // "add 40%", "40% profit margin", "margen del 30%"
+ "discount_pct": number|null,     // "apply 10% discount", "10% de descuento al cliente" — a discount GRANTED, not a margin
  "price_source_site": string|null} // domain, ONLY on an explicit order to take prices from that website
 If the text states none of these, use null. JSON only."""
 
@@ -175,7 +177,7 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
             instr = llm.chat_json(system=_INSTR_SYSTEM, user=instr_src[:4000], max_tokens=300) or {}
         except Exception:
             instr = {}  # best-effort: fall back to the main parse's values
-        for key in ("customer_name", "margin_pct", "price_source_site"):
+        for key in ("customer_name", "margin_pct", "discount_pct", "price_source_site"):
             v = instr.get(key)
             if v not in (None, ""):
                 result[key] = v
@@ -187,6 +189,7 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
             return None
 
     result["margin_pct"] = _f(result.get("margin_pct"))
+    result["discount_pct"] = _f(result.get("discount_pct"))
     result["price_source_site"] = _domain(result.get("price_source_site"))
     cur = str(result.get("currency") or "").strip().upper()
     result["currency"] = cur if len(cur) == 3 and cur.isalpha() else None
