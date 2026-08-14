@@ -84,10 +84,16 @@ Rules:
   part_number "FRN15G15-4T") — pull it out; the full text stays in description.
 - NEVER use as part_number: line numbers, or regulatory/certification codes printed on labels
   (KCC-..., MSIP-..., UL, CE, NOM ...) — those are not catalog codes; leave them out entirely.
-- Customer tables often ALSO carry the customer's own internal item/account/stock code (a column like
-  "No. de parte ABC", "Código", "Item #", often sequential or same-prefixed for every row). That is NOT
-  the part_number. Prefer the manufacturer/catalog code; if only the internal code exists, put it at the
-  start of the description (e.g. "[cód. cliente 123456] ...") and set part_number null.
+- Some customer tables ALSO carry the customer's own internal item/account/stock code in a SEPARATE
+  column ("No. de parte ABC", "Código interno", "Item #" — values sequential or sharing one prefix on
+  EVERY row) in addition to the manufacturer-code column. Prefer the manufacturer/catalog code as
+  part_number. Judge the COLUMN, never single rows: EVERY value in a manufacturer-code column
+  ("Numero de parte", "Part Number", "Catálogo") is a part_number, including short or purely numeric
+  ones (WAGO "221-412", Thermal "3002-04"). Write "[cód. cliente 123456] ..." at the start of the
+  description with part_number null ONLY when the document shows no manufacturer code for the line
+  at all — NEVER for a value that sits in the same column as other manufacturer codes. A line whose
+  part-number cell is non-empty must have part_number set: copy the cell VERBATIM, even a short or
+  purely numeric value ("CA-11807", "3002-04") — never null, never moved into the description.
 - Numbers: dot decimal, no thousands separators; quantity must be a number.
 - Content may be Spanish/English or both. Ignore signatures, disclaimers, prices the customer
   typed (unit_cost in supplier-quote mode is the one exception).
@@ -113,7 +119,32 @@ def _domain(v) -> str | None:
     return s if "." in s else None
 
 
+_MIN_IMG_WIDTH = 2000  # below this the vision model drops/garbles table rows
+
+
+def _upscale_if_small(img_bytes: bytes) -> bytes:
+    """Inline-email RFQ tables are often tiny screenshots (~900px for 20+ rows);
+    lanczos-upscaling to >=1500px wide fixes the OCR more than any prompt tweak."""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(img_bytes))
+        if im.width >= _MIN_IMG_WIDTH:
+            return img_bytes
+        scale = min(4, -(-_MIN_IMG_WIDTH // im.width))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        im = im.resize((im.width * scale, im.height * scale), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:
+        return img_bytes  # unreadable/exotic image: send as-is
+
+
 def _img_data_url(img_bytes: bytes, filename: str) -> str:
+    up = _upscale_if_small(img_bytes)
+    if up is not img_bytes:
+        return "data:image/png;base64," + base64.b64encode(up).decode("ascii")
     ext = filename.lower().rsplit(".", 1)[-1]
     mime = "image/png" if ext == "png" else "image/jpeg"
     return f"data:{mime};base64," + base64.b64encode(img_bytes).decode("ascii")
