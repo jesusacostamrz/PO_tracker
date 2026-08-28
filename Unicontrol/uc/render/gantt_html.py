@@ -145,7 +145,8 @@ def _row_html(r: Row) -> str:
     dot = f'<span class="dot" style="background:{r.color}"></span>'
     wbs = f'<span class="wbs">{esc(r.wbs)}</span>' if r.wbs else ""
     name_title = esc(r.name_title) if r.name_title else esc(r.label)
-    label = f'{dot}{wbs}<span class="tname" title="{name_title}">{esc(r.label)}</span>'
+    rc = '<span class="rc" title="Ruta crítica">RC</span>' if (r.crit and r.row_class) else ""
+    label = f'{dot}{wbs}<span class="tname" title="{name_title}">{esc(r.label)}</span>{rc}'
     mark_title = esc(r.mark_title) if r.mark_title else esc(r.label)
     tick = (f'<span class="btick" style="left:{r.baseline_end_left:.3f}%"></span>'
             if r.baseline_end_left is not None else "")
@@ -167,6 +168,8 @@ def _row_html(r: Row) -> str:
                f'title="{mark_title}">{fill}{inlabel}</div>')
         track = f'<div class="track">{tick}{bar}</div>'
     row_cls = f"row {r.row_class}" if r.row_class else "row"
+    if r.crit and r.row_class:
+        row_cls += " oncrit"
     rlabel_attr = f' style="padding-left:{12 + r.indent * 20}px"' if r.indent else ""
     return f'<div class="{row_cls}"><div class="rlabel"{rlabel_attr}>{label}{vtag}</div>{track}</div>'
 
@@ -204,7 +207,8 @@ def _axis_html(dmin, dmax) -> str:
 
 def render_chart(chart: Chart) -> str:
     rows = "\n".join(_row_html(r) for r in chart.rows)
-    axis = _axis_html(chart.date_min, chart.date_max) if chart.date_min and chart.date_max else ""
+    has_crit = " has-crit" if any(r.crit and r.row_class for r in chart.rows) else ""
+    axis =_axis_html(chart.date_min, chart.date_max) if chart.date_min and chart.date_max else ""
     min_w = (f"min-width:{320 + 14 * max((chart.date_max - chart.date_min).days, 1)}px;"
              if axis else "")
     total_var = f"--total:{chart.total};" if chart.total is not None else ""
@@ -220,7 +224,7 @@ def render_chart(chart: Chart) -> str:
         <p class="meta">{chart.meta}</p>
       </div>
       <div class="gantt-scroll">
-        <div class="gantt" style="{min_w}{total_var}--step:{chart.step:.4f}%">
+        <div class="gantt{has_crit}" style="{min_w}{total_var}--step:{chart.step:.4f}%">
           {axis}{today_line}{rows}
         </div>
       </div>
@@ -309,6 +313,12 @@ EXTRA_CSS_INTERNAL = r"""
 .btick { position:absolute; top:4px; bottom:4px; width:2px; margin-left:-1px;
   background:var(--muted); opacity:.45; z-index:2; }
 .rlabel, .axis .rlabel { position:sticky; left:0; z-index:5; background:var(--panel); }
+.rc { flex:none; font-family:var(--mono); font-size:9.5px; font-weight:700; color:#fff;
+  background:var(--accent); border-radius:4px; padding:1px 4px; line-height:1.3; }
+/* when a chart has a critical path, everything off it fades so the chain reads as one line */
+.gantt.has-crit .row:not(.oncrit) .bar, .gantt.has-crit .row:not(.oncrit) .ms { opacity:.35; }
+.gantt.has-crit .row.oncrit .bar.crit { box-shadow:0 0 0 3px var(--accent); }
+.gantt.has-crit .row.oncrit .track { background-color:rgba(217,123,18,.07); }
 .swatch-bbar { width:26px; height:4px; border-radius:2px; background:var(--muted); opacity:.4; display:inline-block; }
 .bbar { position:absolute; top:22px; height:4px; border-radius:2px; background:var(--muted);
   opacity:.4; z-index:1; }
@@ -393,8 +403,10 @@ def internal_plan_to_chart(plan: InternalPlan) -> Chart:
 
 def render_internal_page(plan: InternalPlan) -> str:
     chart = internal_plan_to_chart(plan)
-    approved = (f" · Línea base aprobada {fmt_date(plan.approved_on)} {plan.approved_on.year}"
-                if plan.approved_on else "")
+    approved = (f" · Línea base v{plan.baseline_version} aprobada {fmt_date(plan.approved_on)} "
+                f"{plan.approved_on.year}" if plan.approved_on else "")
+    if plan.baseline_reason:
+        approved += f" · motivo: {esc(plan.baseline_reason)}"
     header = (
         '  <p class="eyebrow">Unicontrol · Seguimiento interno'
         '<span class="badge-int">Uso interno</span></p>\n'

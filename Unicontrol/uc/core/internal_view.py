@@ -61,6 +61,8 @@ class InternalPlan:
     overall_progress: float = 0.0
     overall_variance_days: int | None = None
     approved_on: date | None = None
+    baseline_version: int = 1
+    baseline_reason: str = ""
 
 
 def build(tasks: list[Task], project_name: str, baseline: Baseline | None,

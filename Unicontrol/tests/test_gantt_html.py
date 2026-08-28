@@ -139,6 +139,12 @@ class TestInternalRender(unittest.TestCase):
         self.assertIn('class="btick"', html)           # baseline tick
         self.assertIn('class="bbar"', html)            # ghost baseline span
         self.assertIn("Ruta crítica", html)
+        self.assertNotIn('class="gantt has-crit"', html)  # no dependencies -> nothing faded
+        plan = self._iplan(); plan.rows[1].crit = True
+        html2 = render_internal_page(plan)
+        self.assertIn('class="gantt has-crit"', html2)
+        self.assertIn('class="row step oncrit"', html2)
+        self.assertIn('class="rc"', html2)
         self.assertIn('<div class="rlabel"><span class="dot"', html)  # vtag lives in the label cell
         self.assertRegex(html, r'class="rlabel"[^>]*>.*?<span class="vtag late">\+5d</span></div><div class="track">')
         self.assertIn("Uso interno", html)

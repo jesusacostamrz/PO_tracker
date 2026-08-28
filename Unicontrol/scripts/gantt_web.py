@@ -15,6 +15,7 @@ import sys
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from uc.core.config import add_hermes_to_path, load_config  # noqa: E402
-from uc.service.gantt_service import RenderError, norm_view, render  # noqa: E402
+from uc.service.gantt_service import RenderError, norm_view, rebaseline, render  # noqa: E402
 
 add_hermes_to_path()
 from uc.connectors.odoo_project import ProjectOdooClient  # noqa: E402
@@ -37,7 +38,7 @@ h1{font-size:26px;margin:0 0 4px;letter-spacing:-.02em}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;
 box-shadow:0 1px 3px rgba(20,30,45,.06)}
 label{display:block;font-size:13px;color:var(--muted);margin:16px 0 6px;font-weight:600}
-select,input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
+select,input[type=date],input[type=text],input:not([type]){width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
 font-size:15px;background:#fff;color:var(--ink)}
 .views{display:flex;gap:10px;margin-top:6px}
 .views label{flex:1;margin:0;display:flex;align-items:center;gap:8px;border:1px solid var(--line);
@@ -88,6 +89,26 @@ def render_index(projects: list[dict]) -> str:
 </div></body></html>"""
 
 
+def rebaseline_page(pid: int) -> str:
+    today = date.today().isoformat()
+    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+<title>Re-aprobar línea base</title><style>{PAGE_CSS}</style></head><body><div class="wrap">
+  <p class="eyebrow">Unicontrol · PM</p>
+  <h1>Re-aprobar línea base</h1>
+  <p class="sub">Proyecto {pid}. La línea base actual se archiva (no se pierde) y las fechas
+  planeadas de HOY en Odoo pasan a ser el nuevo plan aprobado. Las desviaciones se reinician.</p>
+  <form class="card" action="/rebaseline" method="post">
+    <input type="hidden" name="project_id" value="{pid}">
+    <label for="reason">Motivo del cambio (obligatorio)</label>
+    <input id="reason" name="reason" required minlength="10" placeholder="Ej. Cliente cambió alcance: +2 piezas, entrega movida al 30 oct">
+    <label for="approved_on">Fecha de aprobación</label>
+    <input id="approved_on" type="date" name="approved_on" value="{today}">
+    <button class="btn" type="submit">Guardar nueva línea base</button>
+    <div class="warn">Solo con aprobación del cliente o de dirección. Queda registrado el motivo y la versión.</div>
+  </form>
+</div></body></html>"""
+
+
 def error_page(message: str, extra_html: str = "") -> str:
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <title>Sin generar</title><style>{PAGE_CSS}</style></head><body><div class="wrap">
@@ -112,6 +133,36 @@ class Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/rebaseline":
+            self._send(404, error_page("Página no encontrada."))
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        q = parse_qs(self.rfile.read(n).decode("utf-8"))
+        raw = q.get("project_id", [""])[0]
+        reason = q.get("reason", [""])[0]
+        as_of_s = q.get("approved_on", [""])[0]
+        if not raw.isdigit():
+            self._send(400, error_page("Falta un proyecto válido."))
+            return
+        pid = int(raw)
+        odoo = self._odoo()
+        proj = odoo.project_by_id(pid)
+        if not proj:
+            self._send(404, error_page(f"No existe el proyecto {pid}."))
+            return
+        try:
+            b = rebaseline(odoo, self.server.cfg, pid, proj["name"], reason,
+                           date.fromisoformat(as_of_s) if as_of_s else None)
+        except RenderError as e:
+            self._send(200, error_page(e.message, f'<a class="btn" href="/rebaseline?project_id={pid}">Volver a intentar</a>'))
+            return
+        self._send(200, error_page(
+            f"Línea base v{b.version} guardada para <b>{escape(b.project_name)}</b> "
+            f"(aprobada {b.approved_on}). La anterior quedó archivada en baselines/history/.",
+            f'<a class="btn" href="/render?project_id={pid}&view=internal">Ver Gantt interno</a>'))
+
     def _odoo(self):
         return ProjectOdooClient.from_config(self.server.cfg)
 
@@ -122,6 +173,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, render_index(odoo.active_projects()))
         elif parsed.path == "/render":
             self._render(parse_qs(parsed.query))
+        elif parsed.path == "/rebaseline":
+            q = parse_qs(parsed.query)
+            raw = q.get("project_id", [""])[0]
+            if not raw.isdigit():
+                self._send(400, error_page("Falta un proyecto válido."))
+                return
+            self._send(200, rebaseline_page(int(raw)))
         elif parsed.path == "/favicon.ico":
             self._send(204, "")
         else:
@@ -156,7 +214,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, full, attachment=f"{fname}.html")
                 return
             href = f"/render?project_id={pid}&view={view}&as_of={as_of.isoformat()}"
-            bar = DOWNLOAD_BAR.replace("{fname}", fname).replace("{href}", href)
+            rebase_btn = (f'<a href="/rebaseline?project_id={pid}" style="margin-left:auto">'
+                          'Re-aprobar línea base…</a>' if view == "internal" else "")
+            bar = (DOWNLOAD_BAR.replace("{fname}", fname).replace("{href}", href)
+                   .replace("{rebase_btn}", rebase_btn))
             self._send(200, html.replace('<div class="wrap">', bar + '<div class="wrap">', 1))
         except RenderError as e:
             extra = ""
@@ -185,7 +246,7 @@ DOWNLOAD_BAR = """<style>
 </style>
 <div class="dlbar">
   <button onclick="window.print()">Descargar PDF</button>
-  <a href="{href}&download=1" download="{fname}.html">Descargar HTML</a>
+  <a href="{href}&download=1" download="{fname}.html">Descargar HTML</a>{rebase_btn}
 </div>
 <script>
 // ponytail: scale the chart to the printable width so all days fit on one A4 landscape page

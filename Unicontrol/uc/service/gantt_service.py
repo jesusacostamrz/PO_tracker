@@ -64,6 +64,8 @@ def render(odoo, cfg, pid: int, name: str, view: str, as_of: date | None = None,
         plan = build_internal(tasks, project_name=name, baseline=baseline, as_of=as_of)
         if not plan.rows:
             raise RenderError(f"[{pid}] {name} no tiene fechas planeadas.", code=3)
+        plan.baseline_version = baseline.version
+        plan.baseline_reason = baseline.reason
         return render_internal_page(plan)
 
     raise RenderError(f"vista desconocida: {view!r} (usa customer|internal).", code=1)
@@ -71,3 +73,17 @@ def render(odoo, cfg, pid: int, name: str, view: str, as_of: date | None = None,
 
 def has_baseline(pid: int) -> bool:
     return bl.load(pid) is not None
+
+
+def rebaseline(odoo, cfg, pid: int, name: str, reason: str, approved_on: date | None = None):
+    """Controlled baseline reset: requires a reason; the previous snapshot is archived by save()."""
+    reason = (reason or "").strip()
+    if len(reason) < 10:
+        raise RenderError("Indica el motivo del cambio de línea base (mínimo 10 caracteres).", code=7)
+    tasks = odoo.load_tasks([pid], cfg["odoo_project"])
+    if not tasks:
+        raise RenderError(f"[{pid}] {name} no tiene tareas.", code=2)
+    baseline = bl.snapshot(pid, name, tasks, approved_on=approved_on)
+    baseline.reason = reason
+    bl.save(baseline)
+    return baseline

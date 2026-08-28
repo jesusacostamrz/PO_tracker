@@ -48,3 +48,29 @@ class TestBaseline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBaselineVersioning(unittest.TestCase):
+    def test_resave_archives_and_bumps_version(self):
+        import tempfile
+        from pathlib import Path
+        from uc.core import baseline as bl
+        from uc.core.models import Task
+        from datetime import date
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            t = [Task(id=1, name="a", planned_start=date(2026, 7, 1), planned_end=date(2026, 7, 5))]
+            b1 = bl.snapshot(9, "P", t, approved_on=date(2026, 7, 1))
+            bl.save(b1, base)
+            t[0].planned_end = date(2026, 7, 9)
+            b2 = bl.snapshot(9, "P", t, approved_on=date(2026, 8, 1))
+            b2.reason = "cliente pidió más piezas"
+            bl.save(b2, base)
+            cur = bl.load(9, base)
+            self.assertEqual(cur.version, 2)
+            self.assertEqual(cur.reason, "cliente pidió más piezas")
+            self.assertEqual(cur.previous_approved_on, date(2026, 7, 1))
+            self.assertEqual(cur.end_of(1), date(2026, 7, 9))
+            arch = base / "history" / "project-9-v1.json"
+            self.assertTrue(arch.exists())
+            self.assertIn('"2026-07-05"', arch.read_text(encoding="utf-8"))

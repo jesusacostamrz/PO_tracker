@@ -24,6 +24,9 @@ class Baseline:
     project_name: str
     approved_on: date | None
     tasks: dict[int, tuple[date | None, date | None]]  # task_id -> (start, end)
+    version: int = 1
+    reason: str = ""                       # why this baseline replaced the previous one
+    previous_approved_on: date | None = None
 
     def end_of(self, task_id: int) -> date | None:
         entry = self.tasks.get(task_id)
@@ -54,12 +57,26 @@ def snapshot(project_id: int, project_name: str, tasks: list[Task],
 
 
 def save(baseline: Baseline, base_dir: Path | None = None) -> Path:
+    """Write the baseline. An existing file is never overwritten silently: it is archived to
+    ``history/project-<id>-v<n>.json`` and the new one gets version n+1 (caller supplies reason)."""
     path = baseline_path(baseline.project_id, base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        prev = load(baseline.project_id, base_dir)
+        hist = path.parent / "history"
+        hist.mkdir(exist_ok=True)
+        (hist / f"project-{baseline.project_id}-v{prev.version}.json").write_text(
+            path.read_text(encoding="utf-8"), encoding="utf-8")
+        baseline.version = prev.version + 1
+        baseline.previous_approved_on = prev.approved_on
     payload = {
         "project_id": baseline.project_id,
         "project_name": baseline.project_name,
         "approved_on": baseline.approved_on.isoformat() if baseline.approved_on else None,
+        "version": baseline.version,
+        "reason": baseline.reason,
+        "previous_approved_on": (baseline.previous_approved_on.isoformat()
+                                 if baseline.previous_approved_on else None),
         "tasks": {
             str(tid): {"start": s.isoformat() if s else None,
                        "end": e.isoformat() if e else None}
@@ -78,4 +95,6 @@ def load(project_id: int, base_dir: Path | None = None) -> Baseline | None:
     tasks = {int(tid): (_d(v.get("start")), _d(v.get("end")))
              for tid, v in data.get("tasks", {}).items()}
     return Baseline(int(data["project_id"]), data.get("project_name", ""),
-                    _d(data.get("approved_on")), tasks)
+                    _d(data.get("approved_on")), tasks,
+                    version=int(data.get("version") or 1), reason=data.get("reason") or "",
+                    previous_approved_on=_d(data.get("previous_approved_on")))
