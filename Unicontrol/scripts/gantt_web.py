@@ -101,10 +101,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quieter console
         pass
 
-    def _send(self, code: int, html: str):
+    def _send(self, code: int, html: str, attachment: str = ""):
         body = html.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if attachment:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if body:
@@ -148,7 +150,14 @@ class Handler(BaseHTTPRequestHandler):
             html = render(odoo, self.server.cfg, pid, proj["name"], view, as_of,
                           save_baseline_if_missing=save_bl)
             fname = f"gantt-{view}-{pid}-{as_of.isoformat()}"
-            self._send(200, html.replace('<div class="wrap">', DOWNLOAD_BAR.replace("{fname}", fname) + '<div class="wrap">', 1))
+            if q.get("download", ["0"])[0] == "1":
+                full = ('<!doctype html><html><head><meta charset="utf-8">'
+                        + html.replace("</style>", "</style></head><body>", 1) + "</body></html>")
+                self._send(200, full, attachment=f"{fname}.html")
+                return
+            href = f"/render?project_id={pid}&view={view}&as_of={as_of.isoformat()}"
+            bar = DOWNLOAD_BAR.replace("{fname}", fname).replace("{href}", href)
+            self._send(200, html.replace('<div class="wrap">', bar + '<div class="wrap">', 1))
         except RenderError as e:
             extra = ""
             if e.code == 6:  # no baseline yet — offer to save it and retry
@@ -162,23 +171,33 @@ class Handler(BaseHTTPRequestHandler):
 DOWNLOAD_BAR = """<style>
 .dlbar { position:sticky; top:0; z-index:9; display:flex; gap:8px; justify-content:flex-end;
   padding:8px 24px; background:var(--panel); border-bottom:1px solid var(--line); }
-.dlbar button { font:inherit; font-size:12.5px; padding:6px 12px; border-radius:8px; cursor:pointer;
-  border:1px solid var(--line); background:var(--paper); color:var(--ink); }
+.dlbar a, .dlbar button { font:inherit; font-size:12.5px; padding:6px 12px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--line); background:var(--paper); color:var(--ink); text-decoration:none; }
 @media print {
+  * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
   .dlbar { display:none; }
-  @page { size:A4 landscape; margin:10mm; }
+  @page { size:A4 landscape; margin:8mm; }
+  html, body { background:#fff; }
   .wrap { padding:0; max-width:none; background:#fff; }
   .gantt-scroll { overflow:visible; border:none; box-shadow:none; }
-  .gantt { min-width:0 !important; }
   .row, .axis { break-inside:avoid; }
 }
 </style>
 <div class="dlbar">
   <button onclick="window.print()">Descargar PDF</button>
-  <button onclick="(function(){var h='<!doctype html>'+document.documentElement.outerHTML;
-    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([h],{type:'text/html'}));
-    a.download='{fname}.html';a.click();})()">Descargar HTML</button>
+  <a href="{href}&download=1" download="{fname}.html">Descargar HTML</a>
 </div>
+<script>
+// ponytail: scale the chart to the printable width so all days fit on one A4 landscape page
+window.addEventListener('beforeprint', function () {
+  document.querySelectorAll('.gantt-scroll').forEach(function (el) {
+    var z = Math.min(1, 1050 / el.scrollWidth); el.style.zoom = z; el.dataset.z = 1;
+  });
+});
+window.addEventListener('afterprint', function () {
+  document.querySelectorAll('.gantt-scroll').forEach(function (el) { el.style.zoom = ''; });
+});
+</script>
 """
 
 
