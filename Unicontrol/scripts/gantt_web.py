@@ -147,7 +147,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             html = render(odoo, self.server.cfg, pid, proj["name"], view, as_of,
                           save_baseline_if_missing=save_bl)
-            self._send(200, html)
+            fname = f"gantt-{view}-{pid}-{as_of.isoformat()}"
+            self._send(200, html.replace('<div class="wrap">', DOWNLOAD_BAR.replace("{fname}", fname) + '<div class="wrap">', 1))
         except RenderError as e:
             extra = ""
             if e.code == 6:  # no baseline yet — offer to save it and retry
@@ -155,6 +156,30 @@ class Handler(BaseHTTPRequestHandler):
                          f'&as_of={as_of.isoformat()}&save_baseline=1">'
                          "Guardar línea base ahora y generar</a>")
             self._send(200, error_page(e.message, extra))
+
+
+# ponytail: native print-to-PDF + Blob download; no libs. Print CSS lets the chart scale to one page.
+DOWNLOAD_BAR = """<style>
+.dlbar { position:sticky; top:0; z-index:9; display:flex; gap:8px; justify-content:flex-end;
+  padding:8px 24px; background:var(--panel); border-bottom:1px solid var(--line); }
+.dlbar button { font:inherit; font-size:12.5px; padding:6px 12px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--line); background:var(--paper); color:var(--ink); }
+@media print {
+  .dlbar { display:none; }
+  @page { size:A4 landscape; margin:10mm; }
+  .wrap { padding:0; max-width:none; background:#fff; }
+  .gantt-scroll { overflow:visible; border:none; box-shadow:none; }
+  .gantt { min-width:0 !important; }
+  .row, .axis { break-inside:avoid; }
+}
+</style>
+<div class="dlbar">
+  <button onclick="window.print()">Descargar PDF</button>
+  <button onclick="(function(){var h='<!doctype html>'+document.documentElement.outerHTML;
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([h],{type:'text/html'}));
+    a.download='{fname}.html';a.click();})()">Descargar HTML</button>
+</div>
+"""
 
 
 def main() -> int:
