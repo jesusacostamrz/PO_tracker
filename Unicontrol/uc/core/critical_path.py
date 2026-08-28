@@ -71,14 +71,14 @@ def compute_cpm(tasks: list[Task]) -> CPMResult:
     return CPMResult(slack=slack, critical=critical, project_length=project_length, order=order)
 
 
-def critical_by_dates(tasks: list[Task], tolerance_days: int = 1) -> set[int]:
-    """Date-aware critical path for a LIVE plan (internal Gantt).
+def critical_by_dates(tasks: list[Task]) -> set[int]:
+    """Date-aware DRIVING PATH for a LIVE plan (internal Gantt).
 
-    Unlike compute_cpm (pure durations), this honours the calendar: a task is critical only
-    if it sits on a dependency chain that reaches the project end with no idle gap between
-    a task's planned end and its successor's planned start (gap <= tolerance_days; 1 = the
-    next calendar day, i.e. back-to-back).
-    Walks backwards from the task(s) that end last. Tasks without dates are ignored.
+    Unlike compute_cpm (pure durations), this honours the calendar. Starting from the task(s)
+    that end last, follow at each step the predecessor(s) with the LEAST float — i.e. the one
+    actually driving the successor's start (float = succ.planned_start - pred.planned_end).
+    Ties keep every tied predecessor. Gaps (weekends, buffers) do not break the chain; only a
+    task with a clearly looser predecessor drops off. Tasks without dates are ignored.
     """
     dated = {t.id: t for t in tasks if t.planned_start and t.planned_end}
     if not dated:
@@ -88,11 +88,12 @@ def critical_by_dates(tasks: list[Task], tolerance_days: int = 1) -> set[int]:
     stack = list(crit)
     while stack:
         cur = dated[stack.pop()]
-        for pid in cur.depends_on:
-            pred = dated.get(pid)
-            if pred is None or pid in crit:
-                continue
-            if (cur.planned_start - pred.planned_end).days <= tolerance_days:
-                crit.add(pid)
-                stack.append(pid)
+        preds = [dated[p] for p in cur.depends_on if p in dated]
+        if not preds:
+            continue
+        min_float = min((cur.planned_start - p.planned_end).days for p in preds)
+        for p in preds:
+            if (cur.planned_start - p.planned_end).days == min_float and p.id not in crit:
+                crit.add(p.id)
+                stack.append(p.id)
     return crit

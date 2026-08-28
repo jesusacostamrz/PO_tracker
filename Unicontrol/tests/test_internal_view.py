@@ -104,13 +104,15 @@ class TestBaselineSpanAndCriticalPath(unittest.TestCase):
         self.assertFalse(rows["Nuevo"].crit)
         self.assertTrue(rows["Diseño detallado"].crit)   # phase inherits from members
 
-    def test_calendar_gap_breaks_the_chain(self):
+    def test_driving_predecessor_wins_gaps_do_not_break(self):
         tasks, baseline = _fixture()
         by = {t.id: t for t in tasks}
-        by[12].depends_on = [11]
-        by[11].planned_end = date(2026, 7, 5)   # Modelado ends 7/5, Planos starts 7/11: 6d float
+        by[12].depends_on = [11, 13]              # Planos (starts 7/11) blocked by both
+        by[11].planned_end = date(2026, 7, 5)     # Modelado ends 7/5  -> 6d float (gap ok)
+        by[13].planned_end = date(2026, 7, 9)     # Nuevo ends 7/9     -> 2d float: driving
         rows = {r.name: r for r in build(tasks, "Proj", baseline).rows}
         self.assertTrue(rows["Planos"].crit)
+        self.assertTrue(rows["Nuevo"].crit)
         self.assertFalse(rows["Modelado"].crit)
 
     def test_cycle_does_not_crash(self):
