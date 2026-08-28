@@ -96,16 +96,25 @@ class TestBaselineSpanAndCriticalPath(unittest.TestCase):
     def test_critical_path_from_dependencies(self):
         tasks, baseline = _fixture()
         by = {t.id: t for t in tasks}
-        by[12].depends_on = [11]          # Modelado(9d) -> Planos(11d) = 20d chain, critical
-        by[13].depends_on = [11]          # Nuevo(3d) hangs off Modelado with slack
+        by[12].depends_on = [11]          # Modelado ends 7/10 -> Planos starts 7/11: no gap
+        by[13].depends_on = [11]          # Nuevo ends 7/8, feeds nothing at the end -> not critical
         rows = {r.name: r for r in build(tasks, "Proj", baseline).rows}
         self.assertTrue(rows["Modelado"].crit)
         self.assertTrue(rows["Planos"].crit)
         self.assertFalse(rows["Nuevo"].crit)
         self.assertTrue(rows["Diseño detallado"].crit)   # phase inherits from members
 
+    def test_calendar_gap_breaks_the_chain(self):
+        tasks, baseline = _fixture()
+        by = {t.id: t for t in tasks}
+        by[12].depends_on = [11]
+        by[11].planned_end = date(2026, 7, 5)   # Modelado ends 7/5, Planos starts 7/11: 6d float
+        rows = {r.name: r for r in build(tasks, "Proj", baseline).rows}
+        self.assertTrue(rows["Planos"].crit)
+        self.assertFalse(rows["Modelado"].crit)
+
     def test_cycle_does_not_crash(self):
         tasks, baseline = _fixture()
         by = {t.id: t for t in tasks}
         by[11].depends_on = [12]; by[12].depends_on = [11]
-        self.assertFalse(any(r.crit for r in build(tasks, "Proj", baseline).rows))
+        build(tasks, "Proj", baseline)   # must not raise

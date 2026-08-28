@@ -69,3 +69,30 @@ def compute_cpm(tasks: list[Task]) -> CPMResult:
     slack = {n: LS[n] - ES[n] for n in order}
     critical = {n for n in order if slack[n] == 0}
     return CPMResult(slack=slack, critical=critical, project_length=project_length, order=order)
+
+
+def critical_by_dates(tasks: list[Task], tolerance_days: int = 1) -> set[int]:
+    """Date-aware critical path for a LIVE plan (internal Gantt).
+
+    Unlike compute_cpm (pure durations), this honours the calendar: a task is critical only
+    if it sits on a dependency chain that reaches the project end with no idle gap between
+    a task's planned end and its successor's planned start (gap <= tolerance_days; 1 = the
+    next calendar day, i.e. back-to-back).
+    Walks backwards from the task(s) that end last. Tasks without dates are ignored.
+    """
+    dated = {t.id: t for t in tasks if t.planned_start and t.planned_end}
+    if not dated:
+        return set()
+    project_end = max(t.planned_end for t in dated.values())
+    crit: set[int] = {tid for tid, t in dated.items() if t.planned_end == project_end}
+    stack = list(crit)
+    while stack:
+        cur = dated[stack.pop()]
+        for pid in cur.depends_on:
+            pred = dated.get(pid)
+            if pred is None or pid in crit:
+                continue
+            if (cur.planned_start - pred.planned_end).days <= tolerance_days:
+                crit.add(pid)
+                stack.append(pid)
+    return crit

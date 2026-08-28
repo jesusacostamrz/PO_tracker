@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from uc.core.baseline import Baseline
-from uc.core.critical_path import compute_cpm
+from uc.core.critical_path import critical_by_dates
 from uc.core.customer_view import (
     clean_name,
     clean_phase_name,
@@ -83,13 +83,11 @@ def build(tasks: list[Task], project_name: str, baseline: Baseline | None,
     def base_start(t: Task) -> date | None:
         return baseline.start_of(t.id) if baseline else None
 
-    # critical path only means something when the plan carries dependencies; phase containers
-    # (tasks with children) are excluded so their long span can't outrank the real chain
+    # critical path only means something when the plan carries dependencies; date-aware so a
+    # task that finished with float before its successor starts is NOT critical. Phase containers
+    # (tasks with children) are excluded so their long span can't outrank the real chain.
     leaves = [t for t in tasks if t.id not in children]
-    try:
-        crit_ids = compute_cpm(leaves).critical if any(t.depends_on for t in leaves) else set()
-    except ValueError:   # dependency cycle in Odoo data -> no critical path rather than a crash
-        crit_ids = set()
+    crit_ids = critical_by_dates(leaves) if any(t.depends_on for t in leaves) else set()
 
     # --- assign palette colors to phases in timeline order (milestones get ACCENT later) ---
     phase_tasks = [t for t in tops if not is_milestone(t)]
