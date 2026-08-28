@@ -43,6 +43,8 @@ class Row:
     variance_label: str = ""   # e.g. "+5d" | "-2d" | "±0" | "nuevo"
     variance_kind: str = ""    # "late" | "early" | "ontime" | "new" -> tag color
     baseline_end_left: float | None = None   # % position of a baseline end-tick
+    baseline_left: float | None = None       # ghost bar of the baseline span (internal)
+    baseline_width: float = 0.0
 
 
 @dataclass
@@ -147,12 +149,15 @@ def _row_html(r: Row) -> str:
     mark_title = esc(r.mark_title) if r.mark_title else esc(r.label)
     tick = (f'<span class="btick" style="left:{r.baseline_end_left:.3f}%"></span>'
             if r.baseline_end_left is not None else "")
+    if r.baseline_left is not None:
+        tick += (f'<span class="bbar" style="left:{r.baseline_left:.3f}%;width:{r.baseline_width:.3f}%" '
+                 f'title="Línea base"></span>')
     vtag = (f'<span class="vtag {r.variance_kind}">{esc(r.variance_label)}</span>'
             if r.variance_label else "")
     if r.kind == "milestone":
         cls = "ms" + (" crit" if r.crit else "") + (" reached" if r.reached else "")
         mark = f'<span class="{cls}" style="left:{r.left:.3f}%" title="{mark_title}"></span>'
-        track = f'<div class="track">{tick}{mark}{vtag}</div>'
+        track = f'<div class="track">{tick}{mark}</div>'
     else:
         cls = "bar" + (" crit" if r.crit else "") + (" lead" if r.lead else "")
         fill = (f'<i class="fill" style="width:{max(0.0, min(r.progress, 100)):.1f}%"></i>'
@@ -160,10 +165,10 @@ def _row_html(r: Row) -> str:
         inlabel = f'<span class="durlbl">{esc(r.dur_label)}</span>' if r.dur_label else ""
         bar = (f'<div class="{cls}" style="left:{r.left:.3f}%;width:{r.width:.3f}%;--c:{r.color}" '
                f'title="{mark_title}">{fill}{inlabel}</div>')
-        track = f'<div class="track">{tick}{bar}{vtag}</div>'
+        track = f'<div class="track">{tick}{bar}</div>'
     row_cls = f"row {r.row_class}" if r.row_class else "row"
     rlabel_attr = f' style="padding-left:{12 + r.indent * 20}px"' if r.indent else ""
-    return f'<div class="{row_cls}"><div class="rlabel"{rlabel_attr}>{label}</div>{track}</div>'
+    return f'<div class="{row_cls}"><div class="rlabel"{rlabel_attr}>{label}{vtag}</div>{track}</div>'
 
 
 def date_range_text(dmin, dmax) -> str:
@@ -303,7 +308,11 @@ EXTRA_CSS_INTERNAL = r"""
 .row.step .rlabel .tname { color:var(--muted); font-size:12px; }
 .btick { position:absolute; top:4px; bottom:4px; width:2px; margin-left:-1px;
   background:var(--muted); opacity:.45; z-index:2; }
-.vtag { position:absolute; right:6px; top:7px; height:16px; display:inline-flex;
+.rlabel, .axis .rlabel { position:sticky; left:0; z-index:5; background:var(--panel); }
+.swatch-bbar { width:26px; height:4px; border-radius:2px; background:var(--muted); opacity:.4; display:inline-block; }
+.bbar { position:absolute; top:22px; height:4px; border-radius:2px; background:var(--muted);
+  opacity:.4; z-index:1; }
+.vtag { margin-left:auto; flex:none; height:16px; display:inline-flex;
   align-items:center; padding:0 6px; border-radius:4px; font-family:var(--mono);
   font-size:10.5px; z-index:4; background:var(--panel); border:1px solid var(--line);
   color:var(--muted); }
@@ -348,15 +357,25 @@ def internal_plan_to_chart(plan: InternalPlan) -> Chart:
         btick = (_pct(r.baseline_end, plan.date_min, span)
                  if r.baseline_end and plan.date_min <= r.baseline_end <= plan.date_max
                  else None)
+        bleft, bwidth = None, 0.0
+        if r.baseline_start and r.baseline_end and r.baseline_end >= r.baseline_start:
+            # clamp the ghost bar to the chart range
+            b0 = max(r.baseline_start, plan.date_min)
+            b1 = min(r.baseline_end, plan.date_max)
+            if b1 >= b0:
+                bleft = _pct(b0, plan.date_min, span)
+                bwidth = max(_pct(b1, plan.date_min, span) - bleft, 0.9)
         if r.kind == "milestone":
             rows.append(Row(label=f"{r.name}  ({fmt_date(r.start)})", kind="milestone",
                             left=left, color=ACCENT, reached=r.reached, row_class="milestone",
-                            variance_label=vlabel, variance_kind=vkind, baseline_end_left=btick))
+                            crit=r.crit, variance_label=vlabel, variance_kind=vkind,
+                            baseline_end_left=btick))
         else:
             width = max(_pct(r.end, plan.date_min, span) - left, 0.9)
             rows.append(Row(label=r.name, kind="phase", left=left, width=width, color=r.color,
-                            progress=r.progress, row_class=r.kind, indent=r.indent,
-                            variance_label=vlabel, variance_kind=vkind, baseline_end_left=btick))
+                            progress=r.progress, row_class=r.kind, indent=r.indent, crit=r.crit,
+                            variance_label=vlabel, variance_kind=vkind, baseline_end_left=btick,
+                            baseline_left=bleft, baseline_width=bwidth))
     today_left = (_pct(plan.as_of, plan.date_min, span)
                   if plan.date_min <= plan.as_of <= plan.date_max else None)
     step = 7 / span * 100
@@ -386,10 +405,12 @@ def render_internal_page(plan: InternalPlan) -> str:
         '  <div class="legend"><div class="grp">'
         '<span class="lg"><span class="swatch-bar"></span>Fase / paso</span>'
         '<span class="lg"><span class="swatch-ms"></span>Hito</span>'
+        '<span class="lg"><span class="swatch-bbar"></span>Línea base</span>'
         '<span class="lg"><span class="swatch-tick"></span>Fin línea base</span>'
+        '<span class="lg"><span class="swatch-bar crit"></span>Ruta crítica</span>'
         '</div><span class="sep"></span><div class="grp">'
-        '<span class="lg"><span class="vtag late" style="position:static">+d</span>Atraso</span>'
-        '<span class="lg"><span class="vtag early" style="position:static">−d</span>Adelanto</span>'
+        '<span class="lg"><span class="vtag late">+d</span>Atraso</span>'
+        '<span class="lg"><span class="vtag early">−d</span>Adelanto</span>'
         '</div></div>'
     )
     return render_page(header, render_chart(chart), extra_css=EXTRA_CSS_INTERNAL,

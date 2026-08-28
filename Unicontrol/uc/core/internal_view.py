@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from uc.core.baseline import Baseline
+from uc.core.critical_path import compute_cpm
 from uc.core.customer_view import (
     clean_name,
     clean_phase_name,
@@ -46,6 +47,8 @@ class InternalRow:
     reached: bool = False        # milestone reached (done or actual end <= as_of)
     variance_days: int | None = None      # None => no baseline entry ("nuevo")
     baseline_end: date | None = None
+    baseline_start: date | None = None    # with baseline_end -> ghost bar of the approved plan
+    crit: bool = False                    # on the CPM critical path (from Odoo dependencies)
 
 
 @dataclass
@@ -74,6 +77,17 @@ def build(tasks: list[Task], project_name: str, baseline: Baseline | None,
 
     def has_base(t: Task) -> bool:
         return baseline.has(t.id) if baseline else False
+
+    def base_start(t: Task) -> date | None:
+        return baseline.start_of(t.id) if baseline else None
+
+    # critical path only means something when the plan carries dependencies; phase containers
+    # (tasks with children) are excluded so their long span can't outrank the real chain
+    leaves = [t for t in tasks if t.id not in children]
+    try:
+        crit_ids = compute_cpm(leaves).critical if any(t.depends_on for t in leaves) else set()
+    except ValueError:   # dependency cycle in Odoo data -> no critical path rather than a crash
+        crit_ids = set()
 
     # --- assign palette colors to phases in timeline order (milestones get ACCENT later) ---
     phase_tasks = [t for t in tops if not is_milestone(t)]
@@ -107,7 +121,7 @@ def build(tasks: list[Task], project_name: str, baseline: Baseline | None,
                 start=day, end=day, progress=100.0 if reached else 0.0,
                 color="", done=t.done, reached=reached,
                 variance_days=_variance(day, base_end(t)) if has_base(t) else None,
-                baseline_end=base_end(t),
+                baseline_end=base_end(t), crit=t.id in crit_ids,
             ))
             continue
 
@@ -126,11 +140,16 @@ def build(tasks: list[Task], project_name: str, baseline: Baseline | None,
         if phase_base is None:
             kid_bases = [base_end(k) for k in kids if base_end(k)]
             phase_base = max(kid_bases) if kid_bases else None
+        phase_bstart = base_start(t)
+        if phase_bstart is None:
+            kid_bstarts = [base_start(k) for k in kids if base_start(k)]
+            phase_bstart = min(kid_bstarts) if kid_bstarts else None
         rows.append(InternalRow(
             name=clean_phase_name(t.name), kind="phase", indent=0,
             start=start, end=p_end, progress=weighted_progress(members),
             color=color_of.get(t.id, PHASE_PALETTE[0]), done=all(x.done for x in members),
             variance_days=_variance(cur_end, phase_base), baseline_end=phase_base,
+            baseline_start=phase_bstart, crit=any(m.id in crit_ids for m in members),
         ))
         # child steps, indented, in start order
         for c in sorted((k for k in kids if k.planned_start and k.planned_end),
@@ -142,7 +161,7 @@ def build(tasks: list[Task], project_name: str, baseline: Baseline | None,
                 progress=100.0 if c.done else float(c.progress),
                 color=color_of.get(t.id, PHASE_PALETTE[0]), done=c.done,
                 variance_days=_variance(c_cur, base_end(c)) if has_base(c) else None,
-                baseline_end=base_end(c),
+                baseline_end=base_end(c), baseline_start=base_start(c), crit=c.id in crit_ids,
             ))
 
     # --- overall metrics -----------------------------------------------------------------

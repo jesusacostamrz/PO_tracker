@@ -110,7 +110,7 @@ class TestInternalRender(unittest.TestCase):
             project_name="Proj",
             rows=[
                 InternalRow("Diseño", "phase", 0, date(2026, 7, 1), date(2026, 7, 20),
-                            40.0, "#3f7cac", False, variance_days=5,
+                            40.0, "#3f7cac", False, variance_days=5, baseline_start=date(2026, 7, 1),
                             baseline_end=date(2026, 7, 15)),
                 InternalRow("Modelado", "step", 1, date(2026, 7, 1), date(2026, 7, 10),
                             100.0, "#3f7cac", True, variance_days=-2,
@@ -137,6 +137,10 @@ class TestInternalRender(unittest.TestCase):
         self.assertIn("padding-left:32px", html)       # indent=1 -> 12+20
         self.assertIn('class="row step"', html)
         self.assertIn('class="btick"', html)           # baseline tick
+        self.assertIn('class="bbar"', html)            # ghost baseline span
+        self.assertIn("Ruta crítica", html)
+        self.assertIn('<div class="rlabel"><span class="dot"', html)  # vtag lives in the label cell
+        self.assertRegex(html, r'class="rlabel"[^>]*>.*?<span class="vtag late">\+5d</span></div><div class="track">')
         self.assertIn("Uso interno", html)
         self.assertIn("Atraso de <b>5 d</b>", html)
 

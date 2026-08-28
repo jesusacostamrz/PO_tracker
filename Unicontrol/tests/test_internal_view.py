@@ -78,3 +78,34 @@ class TestInternalView(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBaselineSpanAndCriticalPath(unittest.TestCase):
+    def test_baseline_start_and_ghost_span(self):
+        tasks, baseline = _fixture()
+        rows = {r.name: r for r in build(tasks, "Proj", baseline, as_of=date(2026, 7, 15)).rows}
+        self.assertEqual(rows["Modelado"].baseline_start, date(2026, 7, 1))
+        self.assertEqual(rows["Modelado"].baseline_end, date(2026, 7, 10))
+        self.assertEqual(rows["Diseño detallado"].baseline_start, date(2026, 7, 1))
+        self.assertIsNone(rows["Nuevo"].baseline_start)
+
+    def test_no_dependencies_means_no_critical_path(self):
+        tasks, baseline = _fixture()
+        self.assertFalse(any(r.crit for r in build(tasks, "Proj", baseline).rows))
+
+    def test_critical_path_from_dependencies(self):
+        tasks, baseline = _fixture()
+        by = {t.id: t for t in tasks}
+        by[12].depends_on = [11]          # Modelado(9d) -> Planos(11d) = 20d chain, critical
+        by[13].depends_on = [11]          # Nuevo(3d) hangs off Modelado with slack
+        rows = {r.name: r for r in build(tasks, "Proj", baseline).rows}
+        self.assertTrue(rows["Modelado"].crit)
+        self.assertTrue(rows["Planos"].crit)
+        self.assertFalse(rows["Nuevo"].crit)
+        self.assertTrue(rows["Diseño detallado"].crit)   # phase inherits from members
+
+    def test_cycle_does_not_crash(self):
+        tasks, baseline = _fixture()
+        by = {t.id: t for t in tasks}
+        by[11].depends_on = [12]; by[12].depends_on = [11]
+        self.assertFalse(any(r.crit for r in build(tasks, "Proj", baseline).rows))

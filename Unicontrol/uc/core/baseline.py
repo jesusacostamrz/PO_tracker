@@ -29,6 +29,10 @@ class Baseline:
         entry = self.tasks.get(task_id)
         return entry[1] if entry else None
 
+    def start_of(self, task_id: int) -> date | None:
+        entry = self.tasks.get(task_id)
+        return entry[0] if entry else None
+
     def has(self, task_id: int) -> bool:
         return task_id in self.tasks
 
