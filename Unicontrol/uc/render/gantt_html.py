@@ -116,7 +116,8 @@ h1 { font-size:clamp(26px,4vw,38px); margin:0 0 8px; letter-spacing:-.02em; text
 .axis .tick.end { transform:translateX(-100%); padding:0 4px 0 0; }
 .axis.days { min-height:18px; border-top:1px solid var(--line); }
 .axis.days .track { height:18px; }
-.axis.days .tick { line-height:18px; font-size:10px; padding-left:3px; border-left-color:var(--grid); }
+.axis.days .tick { line-height:18px; font-size:9px; padding-left:2px; border-left-color:var(--grid); }
+.axis.days .tick.we { opacity:.45; }
 .row { display:grid; grid-template-columns:320px 1fr; align-items:center; border-top:1px solid var(--line);
   min-height:30px; }
 .row:first-child { border-top:none; }
@@ -185,9 +186,11 @@ def _axis_html(dmin, dmax) -> str:
         if 6 < pct < 92:   # ponytail: drop ticks that would overlap the edge labels
             ticks.append(f'<span class="tick" style="left:{pct:.3f}%">{MONTHS[m]} {y}</span>')
     ticks.append(f'<span class="tick edge end" style="left:100%">{fmt_date(dmax)}</span>')
-    # second row: day-of-month at every weekly grid line (grid step is 7 days from dmin)
-    days = "".join(f'<span class="tick day" style="left:{_pct(dmin + timedelta(days=i), dmin, span):.3f}%">'
-                   f'{(dmin + timedelta(days=i)).day}</span>' for i in range(0, span + 1, 7))
+    # second row: every day of the period; weekends dimmed. Chart min-width guarantees >=14px/day.
+    days = "".join(
+        f'<span class="tick day{" we" if d.weekday() >= 5 else ""}" style="left:{_pct(d, dmin, span):.3f}%">'
+        f'{d.day}</span>'
+        for d in (dmin + timedelta(days=i) for i in range(span + 1)))
     return (f'<div class="axis"><div class="rlabel">{date_range_text(dmin, dmax)}</div>'
             f'<div class="track">{"".join(ticks)}</div></div>\n          '
             f'<div class="axis days"><div class="rlabel">día</div>'
@@ -197,6 +200,8 @@ def _axis_html(dmin, dmax) -> str:
 def render_chart(chart: Chart) -> str:
     rows = "\n".join(_row_html(r) for r in chart.rows)
     axis = _axis_html(chart.date_min, chart.date_max) if chart.date_min and chart.date_max else ""
+    min_w = (f"min-width:{320 + 14 * max((chart.date_max - chart.date_min).days, 1)}px;"
+             if axis else "")
     total_var = f"--total:{chart.total};" if chart.total is not None else ""
     # today_left is a % of the TRACK, but the line lives in .gantt (label col + track): offset by the label col
     today_line = (f'<div class="todayline" style="left:calc(320px + (100% - 320px) * '
@@ -210,7 +215,7 @@ def render_chart(chart: Chart) -> str:
         <p class="meta">{chart.meta}</p>
       </div>
       <div class="gantt-scroll">
-        <div class="gantt" style="{total_var}--step:{chart.step:.4f}%">
+        <div class="gantt" style="{min_w}{total_var}--step:{chart.step:.4f}%">
           {axis}{today_line}{rows}
         </div>
       </div>

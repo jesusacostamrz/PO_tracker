@@ -142,7 +142,7 @@ class TestInternalRender(unittest.TestCase):
 
     def test_date_axis_and_range(self):
         from datetime import date
-        from uc.render.gantt_html import _axis_html, render_internal_page
+        from uc.render.gantt_html import Chart, _axis_html, render_chart, render_internal_page
         html = render_internal_page(self._iplan())
         self.assertIn('class="axis"', html)
         self.assertIn("1 jul 2026 → 25 jul 2026", html)          # range in meta + axis label
@@ -153,8 +153,11 @@ class TestInternalRender(unittest.TestCase):
         self.assertIn(">sep 2026<", axis)
         self.assertNotIn(">jun 2026<", axis)
         self.assertIn('class="axis days"', axis)
-        self.assertIn('class="tick day" style="left:0.000%">20<', axis)   # dmin day
-        self.assertIn('style="left:8.537%">27<', axis)                      # +7d                        # start month is the edge label
+        self.assertIn('class="tick day we" style="left:0.000%">20<', axis)   # dmin day
+        self.assertIn('style="left:1.220%">21<', axis)                      # +1d: every day
+        self.assertIn('class="tick day we"', axis)                          # weekend dimmed
+        html = render_chart(Chart("P", "s", "m", rows=[], date_min=date(2026, 6, 20), date_max=date(2026, 9, 10)))
+        self.assertIn("min-width:1468px", html)                             # 320 + 14*82                        # start month is the edge label
 
     def test_internal_uses_full_detail(self):
         from uc.render.gantt_html import render_internal_page
