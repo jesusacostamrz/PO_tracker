@@ -9,7 +9,7 @@ from uc.core.customer_view import CustomerPlan
 from uc.core.internal_view import InternalPlan
 from uc.core.palette import ACCENT
 
-from datetime import date
+from datetime import date, timedelta
 
 MONTHS = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
@@ -114,6 +114,9 @@ h1 { font-size:clamp(26px,4vw,38px); margin:0 0 8px; letter-spacing:-.02em; text
   font-family:var(--mono); font-size:11px; color:var(--muted); white-space:nowrap; line-height:26px; }
 .axis .tick.edge { border-left:none; }
 .axis .tick.end { transform:translateX(-100%); padding:0 4px 0 0; }
+.axis.days { min-height:18px; border-top:1px solid var(--line); }
+.axis.days .track { height:18px; }
+.axis.days .tick { line-height:18px; font-size:10px; padding-left:3px; border-left-color:var(--grid); }
 .row { display:grid; grid-template-columns:320px 1fr; align-items:center; border-top:1px solid var(--line);
   min-height:30px; }
 .row:first-child { border-top:none; }
@@ -182,8 +185,13 @@ def _axis_html(dmin, dmax) -> str:
         if 6 < pct < 92:   # ponytail: drop ticks that would overlap the edge labels
             ticks.append(f'<span class="tick" style="left:{pct:.3f}%">{MONTHS[m]} {y}</span>')
     ticks.append(f'<span class="tick edge end" style="left:100%">{fmt_date(dmax)}</span>')
+    # second row: day-of-month at every weekly grid line (grid step is 7 days from dmin)
+    days = "".join(f'<span class="tick day" style="left:{_pct(dmin + timedelta(days=i), dmin, span):.3f}%">'
+                   f'{(dmin + timedelta(days=i)).day}</span>' for i in range(0, span + 1, 7))
     return (f'<div class="axis"><div class="rlabel">{date_range_text(dmin, dmax)}</div>'
-            f'<div class="track">{"".join(ticks)}</div></div>\n          ')
+            f'<div class="track">{"".join(ticks)}</div></div>\n          '
+            f'<div class="axis days"><div class="rlabel">día</div>'
+            f'<div class="track">{days}</div></div>\n          ')
 
 
 def render_chart(chart: Chart) -> str:

@@ -151,7 +151,10 @@ class TestInternalRender(unittest.TestCase):
         self.assertIn(">jul 2026<", axis)
         self.assertIn(">ago 2026<", axis)
         self.assertIn(">sep 2026<", axis)
-        self.assertNotIn(">jun 2026<", axis)                        # start month is the edge label
+        self.assertNotIn(">jun 2026<", axis)
+        self.assertIn('class="axis days"', axis)
+        self.assertIn('class="tick day" style="left:0.000%">20<', axis)   # dmin day
+        self.assertIn('style="left:8.537%">27<', axis)                      # +7d                        # start month is the edge label
 
     def test_internal_uses_full_detail(self):
         from uc.render.gantt_html import render_internal_page
