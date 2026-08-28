@@ -84,6 +84,9 @@ nothing built on guessed names. *(Requires 👤 the bot to have Project rights �
   (**overdue**, **near-deadline no progress**, **predecessor slipped onto critical path**).
   Deterministic, stdlib-only → unit-tested via `scripts/test_logic.py`.
 - 🤖 `core/baseline.py` — snapshot planned dates to the `Baselines` tab on approval.
+- ✅ `uc/render/gantt_html.py` — **date axis** on customer + internal Gantt: project start → end
+  in the meta line and a header row above the bars (edge dates + month ticks), so the customer sees
+  the whole timeframe at a glance (done 2026-08-27).
 - 🤖 `core/actions.py` + `core/digest.py` — mirror `hermes/core/actions.py`: dry_run branch, audit to
   Sheet, idempotent alert log. Internal alert = Odoo task note + `send_email`. Critical-path slip =
   **LLM-drafted client heads-up to `Approvals` (+ emailed to approver) — never sent to the client.**

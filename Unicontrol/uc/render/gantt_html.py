@@ -9,6 +9,8 @@ from uc.core.customer_view import CustomerPlan
 from uc.core.internal_view import InternalPlan
 from uc.core.palette import ACCENT
 
+from datetime import date
+
 MONTHS = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
 
@@ -52,6 +54,8 @@ class Chart:
     step: float = 0.0
     today_left: float | None = None
     total: int | None = None   # emits --total CSS var only when set (template)
+    date_min: object = None    # date; when both set, a date axis row + range is rendered
+    date_max: object = None
 
 
 # --- exact copy of the original <style> BODY (between <style> and </style>) ---
@@ -103,6 +107,13 @@ h1 { font-size:clamp(26px,4vw,38px); margin:0 0 8px; letter-spacing:-.02em; text
 .gantt-scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--panel);
   box-shadow:var(--shadow); }
 .gantt { min-width:760px; }
+.axis { display:grid; grid-template-columns:320px 1fr; min-height:26px; background:var(--panel); }
+.axis .rlabel { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.axis .track { height:26px; background:none; }
+.axis .tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--line); padding-left:4px;
+  font-family:var(--mono); font-size:11px; color:var(--muted); white-space:nowrap; line-height:26px; }
+.axis .tick.edge { border-left:none; }
+.axis .tick.end { transform:translateX(-100%); padding:0 4px 0 0; }
 .row { display:grid; grid-template-columns:320px 1fr; align-items:center; border-top:1px solid var(--line);
   min-height:30px; }
 .row:first-child { border-top:none; }
@@ -151,10 +162,37 @@ def _row_html(r: Row) -> str:
     return f'<div class="{row_cls}"><div class="rlabel"{rlabel_attr}>{label}</div>{track}</div>'
 
 
+def date_range_text(dmin, dmax) -> str:
+    return f"{fmt_date(dmin)} {dmin.year} → {fmt_date(dmax)} {dmax.year}"
+
+
+def _axis_html(dmin, dmax) -> str:
+    """Header row: project start/end at the edges, one tick per month start in between."""
+    span = max((dmax - dmin).days, 1)
+    ticks = [f'<span class="tick edge" style="left:0">{fmt_date(dmin)}</span>']
+    y, m = dmin.year, dmin.month
+    while True:
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+        d = date(y, m, 1)
+        if d >= dmax:
+            break
+        pct = _pct(d, dmin, span)
+        if 6 < pct < 92:   # ponytail: drop ticks that would overlap the edge labels
+            ticks.append(f'<span class="tick" style="left:{pct:.3f}%">{MONTHS[m]} {y}</span>')
+    ticks.append(f'<span class="tick edge end" style="left:100%">{fmt_date(dmax)}</span>')
+    return (f'<div class="axis"><div class="rlabel">{date_range_text(dmin, dmax)}</div>'
+            f'<div class="track">{"".join(ticks)}</div></div>\n          ')
+
+
 def render_chart(chart: Chart) -> str:
     rows = "\n".join(_row_html(r) for r in chart.rows)
+    axis = _axis_html(chart.date_min, chart.date_max) if chart.date_min and chart.date_max else ""
     total_var = f"--total:{chart.total};" if chart.total is not None else ""
-    today_line = (f'<div class="todayline" style="left:{chart.today_left:.3f}%"></div>\n          '
+    # today_left is a % of the TRACK, but the line lives in .gantt (label col + track): offset by the label col
+    today_line = (f'<div class="todayline" style="left:calc(320px + (100% - 320px) * '
+                  f'{chart.today_left / 100:.5f})"></div>\n          '
                   if chart.today_left is not None else "")
     return f"""
     <section class="chart">
@@ -165,7 +203,7 @@ def render_chart(chart: Chart) -> str:
       </div>
       <div class="gantt-scroll">
         <div class="gantt" style="{total_var}--step:{chart.step:.4f}%">
-          {today_line}{rows}
+          {axis}{today_line}{rows}
         </div>
       </div>
     </section>"""
@@ -213,10 +251,12 @@ def plan_to_chart(plan: CustomerPlan) -> Chart:
                   if plan.date_min <= plan.as_of <= plan.date_max else None)
     step = 7 / span * 100
     meta = (f"Avance <b>{plan.overall_progress:.0f}%</b> · {len(plan.phases)} fases · "
-            f"{len(plan.milestones)} hitos · al {fmt_date(plan.as_of)} {plan.as_of.year}")
+            f"{len(plan.milestones)} hitos · {date_range_text(plan.date_min, plan.date_max)} · "
+            f"al {fmt_date(plan.as_of)} {plan.as_of.year}")
     return Chart(title=plan.project_name,
                  subtitle="Cronograma del proyecto — fases y fechas clave.",
-                 meta=meta, rows=rows, step=step, today_left=today_left)
+                 meta=meta, rows=rows, step=step, today_left=today_left,
+                 date_min=plan.date_min, date_max=plan.date_max)
 
 
 def render_customer_page(plan: CustomerPlan) -> str:
@@ -311,10 +351,12 @@ def internal_plan_to_chart(plan: InternalPlan) -> Chart:
     n_steps = sum(1 for r in plan.rows if r.kind == "step")
     var = _overall_variance_text(plan.overall_variance_days).replace("<b>", "").replace("</b>", "")
     meta = (f"Avance <b>{plan.overall_progress:.0f}%</b> · {n_phases} fases · {n_steps} pasos · "
-            f"{var} · al {fmt_date(plan.as_of)} {plan.as_of.year}")
+            f"{var} · {date_range_text(plan.date_min, plan.date_max)} · "
+            f"al {fmt_date(plan.as_of)} {plan.as_of.year}")
     return Chart(title=plan.project_name,
                  subtitle="Plan completo — fases, pasos e hitos contra la línea base aprobada.",
-                 meta=meta, rows=rows, step=step, today_left=today_left)
+                 meta=meta, rows=rows, step=step, today_left=today_left,
+                 date_min=plan.date_min, date_max=plan.date_max)
 
 
 def render_internal_page(plan: InternalPlan) -> str:

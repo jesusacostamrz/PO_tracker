@@ -36,7 +36,9 @@ class TestRenderChart(unittest.TestCase):
 
     def test_today_line_only_when_set(self):
         self.assertNotIn("todayline", render_chart(Chart("P", "s", "m", rows=[])))
-        self.assertIn("todayline", render_chart(Chart("P", "s", "m", rows=[], today_left=50.0)))
+        html = render_chart(Chart("P", "s", "m", rows=[], today_left=50.0))
+        self.assertIn("todayline", html)
+        self.assertIn("calc(320px + (100% - 320px) * 0.50000)", html)  # offset by the label column
 
     def test_helpers(self):
         from datetime import date
@@ -137,6 +139,19 @@ class TestInternalRender(unittest.TestCase):
         self.assertIn('class="btick"', html)           # baseline tick
         self.assertIn("Uso interno", html)
         self.assertIn("Atraso de <b>5 d</b>", html)
+
+    def test_date_axis_and_range(self):
+        from datetime import date
+        from uc.render.gantt_html import _axis_html, render_internal_page
+        html = render_internal_page(self._iplan())
+        self.assertIn('class="axis"', html)
+        self.assertIn("1 jul 2026 → 25 jul 2026", html)          # range in meta + axis label
+        self.assertIn('class="tick edge end"', html)
+        axis = _axis_html(date(2026, 6, 20), date(2026, 9, 10))
+        self.assertIn(">jul 2026<", axis)
+        self.assertIn(">ago 2026<", axis)
+        self.assertIn(">sep 2026<", axis)
+        self.assertNotIn(">jun 2026<", axis)                        # start month is the edge label
 
     def test_internal_uses_full_detail(self):
         from uc.render.gantt_html import render_internal_page
