@@ -1,6 +1,6 @@
 # Hermes — Purchasing workflow (shortage → draft RFQs in Odoo)
 
-Status 2026-09-10: implemented, offline tests pass, **not yet committed** (untracked files).
+Status 2026-09-16: committed (deb0bb8). Offline tests pass. NOT yet run against Odoo 19 (the instance upgraded from 17 in Sept 2026): run the dry-run on the VPS first, then --live on one real SO.
 
 ## Flow
 
