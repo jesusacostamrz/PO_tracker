@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import re
+import unicodedata
+
 from rapidfuzz import fuzz
 
 _CUST_MIN = 0.80          # min customer-name similarity to consider a quote
@@ -31,10 +34,22 @@ class MatchResult:
     candidates: list | None = None
 
 
+# Legal-form / filler tokens that differ between a PO letterhead and the Odoo
+# partner name ("Volex de México, S.A. de C.V." vs "VOLEX DE MEXICO").
+_NAME_NOISE = {"sa", "cv", "sapi", "srl", "rl", "s", "a", "c", "v", "de", "del", "la",
+               "inc", "corp", "corporation", "co", "ltd", "llc", "sc", "cia"}
+
+
+def _norm_name(name: str) -> str:
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    toks = re.sub(r"[^a-z0-9 ]+", " ", plain.lower()).split()
+    return " ".join(t for t in toks if t not in _NAME_NOISE) or plain.lower()
+
+
 def _cust_sim(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
-    return fuzz.token_set_ratio(a.lower(), b.lower()) / 100.0
+    return fuzz.token_set_ratio(_norm_name(a), _norm_name(b)) / 100.0
 
 
 def _price_overlap(po_items, quote_lines) -> float:

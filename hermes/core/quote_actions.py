@@ -235,11 +235,34 @@ def _trusted(m: LineMatch) -> bool:
 
 
 def _line_name(m: LineMatch) -> str | None:
-    # customer's own wording on the line so the salesperson (and the
-    # customer PDF) see what was asked for, not just our catalog name
+    """Sales-description format (user rule 2026-08-17): EVERY quote line carries
+    MARCA / MODELO / SERIE labels. MODELO is the resolved catalog item number
+    (pricebook item beats a typo'd customer code — the cited code is kept as
+    'cód. cliente' in the description); SERIE stays blank for the salesperson;
+    a missing brand leaves MARCA blank for the human too."""
+    pb = m.line.get("_pricebook") or {}
     part = m.line.get("part_number") or ""
-    desc = m.line.get("description") or ""
-    return f"[{part}] {desc}".strip() if part and desc else (desc or part or None)
+    # a trusted catalog match resolves a typo'd cited code to the real product name
+    model = pb.get("item") or ((m.product or {}).get("name") if _trusted(m) else None) or part
+    brand = pb.get("vendor") or m.line.get("manufacturer") or ""
+    desc = m.line.get("description") or pb.get("type") or ""
+    if not (model or desc):
+        return None
+    if part and model and norm_code(part) != norm_code(model):
+        desc = f"{desc} (cód. cliente {part})".strip()
+    return "\n".join([model or desc,
+                      f"MARCA: {brand}".rstrip(),
+                      f"MODELO: {model}".rstrip(),
+                      "SERIE:",
+                      f"DESCRIPCION: {desc}".rstrip()])
+
+
+def _moq_lead(m: LineMatch) -> dict:
+    # user rule 2026-08-17: surface the pricebook MOQ in the quote line's
+    # 'Plazo de entrega' (customer_lead) column so the salesperson can advise
+    # the customer there is a minimum order qty; MOQ 1 is noise — skipped
+    moq = (m.line.get("_pricebook") or {}).get("moq")
+    return {"customer_lead": moq} if moq and moq > 1 else {}
 
 
 def _create_missing_products(odoo: OdooClient, cfg: dict, matches: list[LineMatch],
@@ -492,7 +515,8 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
                               f"{len(no_disc)} line(s) are priced without it — review before sending.")
         # an explicit cost+margin instruction overrides the catalog price
         auto_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
-                       **({"price_unit": p} if (p := sale_of(m)) is not None else {})}
+                       **({"price_unit": p} if (p := sale_of(m)) is not None else {}),
+                       **({"name": n} if (n := _line_name(m)) else {}), **_moq_lead(m)}
                      for m in auto]  # no price_unit: Odoo prices from the pricelist
         if dry:
             _audit("odoo_create_quote",
@@ -513,10 +537,12 @@ def apply_rfq(odoo, sheets, cfg, rfq: dict, matches: list[LineMatch],
 
             costed_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                             "price_unit": sale_of(m),
-                            **({"name": n} if (n := _line_name(m)) else {})} for m in costed]
+                            **({"name": n} if (n := _line_name(m)) else {}),
+                            **_moq_lead(m)} for m in costed]
             queue_lines = [{"product_id": m.product["id"], "product_uom_qty": m.line["quantity"],
                            "price_unit": 0.0,
-                           **({"name": n} if (n := _line_name(m)) else {})} for m in queue]
+                           **({"name": n} if (n := _line_name(m)) else {}),
+                           **_moq_lead(m)} for m in queue]
             lines = auto_lines + costed_lines + queue_lines
             out.order_id = odoo.create_draft_quote(partner["id"], lines, client_ref=rfq_ref)
             out.order_name = odoo.read_field("sale.order", out.order_id, "name") or ""

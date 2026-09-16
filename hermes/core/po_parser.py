@@ -18,15 +18,27 @@ import pypdfium2 as pdfium
 
 # Skip generic legal pages so we don't waste tokens or distract the model.
 _TC_MARKERS = ("terminos y condiciones", "terms and conditions")
-# Below this many extracted chars we treat the PDF as scanned and use vision.
+# Below this many extracted chars a PAGE is treated as scanned (an image).
 _TEXT_MIN_CHARS = 120
+# Max scanned pages rendered for the vision model (PO pages, not e-sign audit trails).
+_MAX_VISION_PAGES = 4
 # Cap text sent to the model (cheap + plenty for the order pages).
 _MAX_TEXT_CHARS = 15000
 
 
-def extract_text(pdf_bytes: bytes) -> str:
+def page_texts(pdf_bytes: bytes) -> list[str]:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        raw = [(i + 1, (p.extract_text() or "")) for i, p in enumerate(pdf.pages)]
+        return [(p.extract_text() or "") for p in pdf.pages]
+
+
+def scanned_pages(pages: list[str]) -> list[int]:
+    """0-based indexes of pages with (almost) no extractable text."""
+    return [i for i, t in enumerate(pages) if len(t.strip()) < _TEXT_MIN_CHARS]
+
+
+def extract_text(pdf_bytes: bytes, pages: list[str] | None = None) -> str:
+    """Text of the non-T&C pages; ``pages`` skips re-extracting when already read."""
+    raw = [(i + 1, t) for i, t in enumerate(pages if pages is not None else page_texts(pdf_bytes))]
     kept = [f"=== PAGE {n} ===\n{t}" for n, t in raw
             if not any(m in t.lower() for m in _TC_MARKERS)]
     if not kept:  # every page looked like T&C — keep them all rather than nothing
@@ -34,11 +46,13 @@ def extract_text(pdf_bytes: bytes) -> str:
     return "\n\n".join(kept).strip()
 
 
-def render_pages_as_data_urls(pdf_bytes: bytes, max_pages: int = 2, scale: float = 2.0) -> list[str]:
+def render_pages_as_data_urls(pdf_bytes: bytes, max_pages: int = 2, scale: float = 2.0,
+                              pages: list[int] | None = None) -> list[str]:
+    """Render ``pages`` (0-based; default: the first ``max_pages``) to PNG data URLs."""
     urls: list[str] = []
     doc = pdfium.PdfDocument(pdf_bytes)
     try:
-        for i in range(min(len(doc), max_pages)):
+        for i in (pages if pages is not None else range(min(len(doc), max_pages))):
             pil = doc[i].render(scale=scale).to_pil()
             buf = io.BytesIO()
             pil.save(buf, format="PNG")
@@ -108,15 +122,26 @@ Rules:
 def parse_po(pdf_bytes: bytes, llm, company: dict) -> dict:
     """Return the structured PO dict. Adds '_source' = 'text' or 'vision'."""
     system = _system_prompt(company)
-    text = extract_text(pdf_bytes)
-    if len(text) >= _TEXT_MIN_CHARS:
+    pages = page_texts(pdf_bytes)
+    scanned = scanned_pages(pages)
+    # Route on the FIRST page, not the whole document: a scanned PO with a text
+    # e-signature audit trail stapled to the end has plenty of chars overall, but
+    # the order itself is only in the images (Volex PO 105381, 2026-09-07).
+    if 0 not in scanned:
+        text = extract_text(pdf_bytes, pages)
         result = llm.chat_json(system=system, user="PO text:\n\n" + text[:_MAX_TEXT_CHARS], max_tokens=2000)
         result["_source"] = "text"
     else:
-        images = render_pages_as_data_urls(pdf_bytes)
+        images = render_pages_as_data_urls(pdf_bytes, pages=scanned[:_MAX_VISION_PAGES])
+        # text pages (scanned cover + a text order table) still reach the model
+        text_pages = [t for i, t in enumerate(pages) if i not in scanned]
+        user_text = "Extract the PO from the attached image(s)."
+        if text_pages:
+            user_text += ("\n\nText of the remaining pages:\n\n"
+                          + "\n\n".join(text_pages)[:_MAX_TEXT_CHARS])
         result = llm.vision_json(
             system=system,
-            user_text="Extract the PO from the attached image(s).",
+            user_text=user_text,
             image_data_urls=images,
             max_tokens=2500,
         )

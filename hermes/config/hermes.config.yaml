@@ -13,7 +13,10 @@ gmail:
   # Unread-only + mark-read on label (NOT label exclusion): Gmail gives a reply
   # arriving into a labeled conversation the thread's labels, so "-label:X"
   # permanently hides new thread replies. newer_than bounds the cutover backlog.
-  poll_query: "is:unread has:attachment filename:pdf newer_than:7d"
+  # -subject:rfq: RFQ mail (team convention: "RFQ" in subject) belongs to the RFQ
+  # intake — without this the PO poller races it, marks the message read, and the
+  # rfq.poll_query (is:unread) never sees it.
+  poll_query: "is:unread has:attachment filename:pdf newer_than:7d -subject:rfq"
   labels:
     processed: Hermes/Processed
     needs_review: Hermes/NeedsReview
@@ -131,6 +134,7 @@ pricebook:
         type: "Type description"   # model designation (e.g. DFK-2,8) -> product NAME
         list: "2026 PL"            # customer list price — quoted as-is
         cost: "2026 Distribuidor"  # our distributor cost (reference)
+        moq: "MOQ"                 # minimum order qty -> quote line 'Plazo de entrega' (customer advisory)
   brands:
     acme:                              # key used as --brand acme
       vendor_name: "ACME Distribution" # res.partner created/reused as the vendor

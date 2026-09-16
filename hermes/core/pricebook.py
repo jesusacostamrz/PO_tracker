@@ -8,7 +8,7 @@ quote_actions (name = the distributor TYPE designation, item number kept in the
 sale description).
 
 Config (pricebook.files.<key>): path (relative to hermes/), vendor_name,
-currency, mxn_fx_surcharge, header_row, columns {item, type, list, cost}.
+currency, mxn_fx_surcharge, header_row, columns {item, type, list, cost, moq?}.
 """
 from __future__ import annotations
 
@@ -78,7 +78,8 @@ def _read_rows(path: Path, fcfg: dict) -> list[list]:
         lst = _num(cell("list"))
         if not (item or type_) or lst is None or lst <= 0:
             continue
-        rows.append([item, type_, lst, _num(cell("cost"))])
+        rows.append([item, type_, lst, _num(cell("cost")),
+                     _num(cell("moq")) if "moq" in idx else None])
     wb.close()
     cache.write_text(json.dumps({"colsig": _colsig(fcfg), "rows": rows}), encoding="utf-8")
     return rows
@@ -92,8 +93,9 @@ class Pricebook:
         self.mxn_fx_surcharge = float(fcfg.get("mxn_fx_surcharge") or 0)
         self.image_site = str(fcfg.get("image_site") or "").strip() or None
         self.index: dict[str, dict] = {}
-        for item, type_, lst, cost in rows:
-            rec = {"item": item, "type": _clean_type(type_), "list": lst, "cost": cost}
+        for item, type_, lst, cost, *rest in rows:  # *rest: pre-moq caches have 4-element rows
+            rec = {"item": item, "type": _clean_type(type_), "list": lst, "cost": cost,
+                   "moq": rest[0] if rest else None}
             for k in (norm_code(item), norm_code(type_)):
                 if k:
                     self.index.setdefault(k, rec)
