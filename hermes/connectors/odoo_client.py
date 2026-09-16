@@ -175,10 +175,10 @@ class OdooClient:
 
     def create_product(self, name: str, default_code: str = "", list_price: float = 0.0,
                        description: str = "", extra: dict | None = None) -> int:
-        # detailed_type "product" = Almacenable (storable, inventory-tracked) —
-        # Odoo's default "consu" (Consumible) skips inventory entirely
+        # Odoo 18+/19: Almacenable (storable) = type "consu" + is_storable True
+        # (detailed_type was removed; instance upgraded to Odoo 19 ~2026-09)
         vals = {"name": name, "sale_ok": True, "list_price": list_price,
-                "detailed_type": "product"}
+                "type": "consu", "is_storable": True}
         if default_code:
             vals["default_code"] = default_code
         if description:
