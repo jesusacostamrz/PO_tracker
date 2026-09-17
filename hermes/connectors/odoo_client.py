@@ -164,7 +164,10 @@ class OdooClient:
     def create_draft_quote(self, partner_id: int, lines: list[dict], client_ref: str = "") -> int:
         """Create a DRAFT sale.order. Never confirms it. Omit price_unit in a line
         to let Odoo price it from the pricelist."""
-        vals = {"partner_id": partner_id, "order_line": [(0, 0, l) for l in lines]}
+        # user_id explicit: otherwise Odoo takes the salesperson from the customer
+        # contact, and Hermes quotes stop showing up under Unicontrolbot.
+        vals = {"partner_id": partner_id, "user_id": self.uid,
+                "order_line": [(0, 0, l) for l in lines]}
         if client_ref:
             vals["client_order_ref"] = client_ref
         return self.execute("sale.order", "create", vals)
@@ -270,6 +273,7 @@ class OdooClient:
         Never confirms it and never sends it to the vendor."""
         return self.execute("purchase.order", "create", {
             "partner_id": partner_id,
+            "user_id": self.uid,  # Compradora (Buyer) = Unicontrolbot, the API user
             "origin": origin,
             "order_line": [(0, 0, l) for l in lines],
         })
