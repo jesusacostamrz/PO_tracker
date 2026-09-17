@@ -14,7 +14,7 @@ Status 2026-09-16: committed (deb0bb8). Offline tests pass. NOT yet run against 
    Takes the BUY lines, resolves each product's vendor via `product.supplierinfo`
    (same records `import_pricelist.py` maintains), clusters by vendor, and prints
    one block per vendor with last-known cost and vendor min-qty warnings.
-   Lines with no vendor on file are listed for a human to assign.
+   Lines with no vendor on file go into one extra draft RFQ on the placeholder vendor "Sin proveedor (asignar)": purchasing changes its vendor in Odoo, or duplicates it per vendor and trims lines.
 3. `python scripts/order_purchasing.py S03107 --live` — creates ONE DRAFT
    `purchase.order` per vendor with `origin = <SO name>` and posts a chatter note
    on the SO listing the RFQs. Never confirms, never sends. Idempotent per
