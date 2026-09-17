@@ -36,6 +36,10 @@ python scripts/process_rfq.py <file.xlsx|.csv|.png|.jpg|.txt|.pdf> [--live]   # 
 python scripts/intake_rfq.py [--live] [--max N] [--watch SECONDS]        # Gmail batch (subject contains "RFQ")
 python scripts/apply_quotes.py [--live]              # apply human pricing from the Pricing Queue tab
 python scripts/import_pricelist.py --brand <key> <lista.xlsx> [--live]   # distributor price list -> Odoo catalog
+# Purchasing (supplier side). Same dry-run defaults; only DRAFT purchase.order (RFQs) are ever written.
+python scripts/order_shortage.py S03107                  # READ-ONLY: SO lines vs inventory sheet -> BUY per line
+python scripts/order_purchasing.py S03107 [--live]       # BUY lines -> one draft RFQ per vendor (+ "Sin proveedor (asignar)" placeholder)
+python scripts/intake_req.py [--live] [--max N] [--watch SECONDS]   # Gmail batch (subject contains "REQ") -> draft RFQs per vendor
 # offline self-checks (no network): test_rfq_gmail, test_rfq_parse, test_product_match,
 #   test_pricelist, test_web_pricing, test_pricebook
 ```

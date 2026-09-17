@@ -14,9 +14,9 @@ gmail:
   # arriving into a labeled conversation the thread's labels, so "-label:X"
   # permanently hides new thread replies. newer_than bounds the cutover backlog.
   # -subject:rfq: RFQ mail (team convention: "RFQ" in subject) belongs to the RFQ
-  # intake — without this the PO poller races it, marks the message read, and the
-  # rfq.poll_query (is:unread) never sees it.
-  poll_query: "is:unread has:attachment filename:pdf newer_than:7d -subject:rfq"
+  # intake; -subject:req similarly reserves requisitions for the REQ intake.
+  # Without these the PO poller can mark messages read before their intake sees them.
+  poll_query: "is:unread has:attachment filename:pdf newer_than:7d -subject:rfq -subject:req"
   labels:
     processed: Hermes/Processed
     needs_review: Hermes/NeedsReview
@@ -43,7 +43,7 @@ sheets:
 
 rfq:
   # Team convention: forward RFQ emails with "RFQ" in the subject.
-  poll_query: 'is:unread subject:RFQ newer_than:7d'   # same unread+mark-read scheme as gmail.poll_query above
+  poll_query: 'is:unread subject:RFQ newer_than:7d -subject:req'   # same unread+mark-read scheme as gmail.poll_query above
   labels:
     processed: Hermes/Processed        # reuse existing labels
     needs_review: Hermes/NeedsReview
@@ -66,6 +66,13 @@ rfq:
     expense_account: "502.01.01"   # POR PAGAR: Compras
     unspsc: true
     unspsc_fallback: "20121445"    # Accesorios y partes — used when a confident pick isn't possible
+
+req:
+  # Team convention: purchase requisitions are emailed with "REQ" in the subject.
+  poll_query: 'is:unread subject:req newer_than:7d'
+  labels:
+    processed: Hermes/Processed
+    needs_review: Hermes/NeedsReview
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.

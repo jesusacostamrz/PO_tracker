@@ -55,6 +55,65 @@ def cluster(to_buy: list[dict], tmpl_map: dict[int, int],
     return by_vendor, unassigned
 
 
+def plan_rfqs(odoo, origin: str, to_buy: list[dict], live: bool,
+              out=print) -> tuple[list[tuple[int, str, str]], bool]:
+    """Plan vendor drafts. Returns (created (id, name, vendor) tuples — none in
+    dry-run, whether any line had no vendor on file)."""
+    tmpl_map = odoo.product_tmpl_map([r["product_id"] for r in to_buy if r["product_id"]])
+    sinfo = odoo.supplierinfo_by_tmpl(set(tmpl_map.values()))
+    by_vendor, unassigned = cluster(to_buy, tmpl_map, sinfo)
+    if unassigned:
+        # Lines with no vendor on file go into ONE draft RFQ on a placeholder
+        # vendor: purchasing reassigns the partner (or duplicates the RFQ to
+        # split it across vendors) from Odoo instead of losing the lines.
+        pid = odoo.ensure_vendor(PLACEHOLDER_VENDOR) if live else 0
+        by_vendor[(pid, PLACEHOLDER_VENDOR)] = [
+            {"product_id": r["product_id"], "name": r["part"],
+             "product_qty": r["buy"], "price_unit": 0.0} for r in unassigned]
+
+    existing = odoo.purchase_orders_by_origin(origin)
+    existing_by_partner: dict[int, dict] = {}
+    for po in existing:
+        pid = po["partner_id"][0] if isinstance(po["partner_id"], (list, tuple)) else po["partner_id"]
+        existing_by_partner.setdefault(pid, po)
+
+    mode = "LIVE" if live else "DRY-RUN (no writes; use --live to create the draft RFQs)"
+    out(f"\nPurchasing plan — {origin}  [{mode}]")
+    out(f"{len(to_buy)} lines to buy -> {len(by_vendor) - bool(unassigned)} vendor(s) on file, "
+          f"{len(unassigned)} line(s) with no vendor (-> RFQ on {PLACEHOLDER_VENDOR!r}).\n")
+
+    created: list[tuple[int, str, str]] = []
+    for (vid, vname), lines in sorted(by_vendor.items(), key=lambda kv: kv[0][1]):
+        subtotal = sum(l["product_qty"] * l["price_unit"] for l in lines)
+        out(f"── {vname}  ({len(lines)} lines, est. cost {subtotal:,.2f})")
+        for l in lines:
+            note = ""
+            if "_min_qty_note" in l:
+                note = f"   [vendor min qty {fmt(l['_min_qty_note'])} — review]"
+            price = f" @ {l['price_unit']:,.2f}" if l["price_unit"] else " @ cost unknown"
+            out(f"   {l['name']:<32} x {fmt(l['product_qty']):>6}{price}{note}")
+        prior = existing_by_partner.get(vid)
+        if prior:
+            out(f"   -> SKIPPED: {prior['name']} ({prior['state']}) already cites "
+                  f"{origin} for this vendor.\n")
+            continue
+        if live:
+            rfq_lines = [{k: v for k, v in l.items() if not k.startswith("_")} for l in lines]
+            rfq_id = odoo.create_draft_rfq(vid, origin, rfq_lines)
+            rfq_name = odoo.read_field("purchase.order", rfq_id, "name")
+            created.append((rfq_id, rfq_name, vname))
+            out(f"   -> created DRAFT RFQ {rfq_name} (origin: {origin}) — "
+                  f"review and send from Odoo.\n")
+        else:
+            out(f"   -> would create 1 draft RFQ (origin: {origin}).\n")
+
+    if unassigned:
+        out(f"NOTE: the {PLACEHOLDER_VENDOR!r} RFQ holds the lines with no vendor on file — "
+              "in Odoo change its vendor, or duplicate it per vendor and trim the lines.\n")
+
+    return created, bool(unassigned)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Cluster a Sales Order's shortage by vendor; --live creates draft RFQs")
@@ -77,63 +136,13 @@ def main() -> int:
         print(f"{order['name']}: stock covers every line — nothing to purchase.")
         return 0
 
-    tmpl_map = odoo.product_tmpl_map([r["product_id"] for r in to_buy])
-    sinfo = odoo.supplierinfo_by_tmpl(set(tmpl_map.values()))
-    by_vendor, unassigned = cluster(to_buy, tmpl_map, sinfo)
-    if unassigned:
-        # Lines with no vendor on file go into ONE draft RFQ on a placeholder
-        # vendor: purchasing reassigns the partner (or duplicates the RFQ to
-        # split it across vendors) from Odoo instead of losing the lines.
-        pid = odoo.ensure_vendor(PLACEHOLDER_VENDOR) if args.live else 0
-        by_vendor[(pid, PLACEHOLDER_VENDOR)] = [
-            {"product_id": r["product_id"], "name": r["part"],
-             "product_qty": r["buy"], "price_unit": 0.0} for r in unassigned]
-
-    existing = odoo.purchase_orders_by_origin(order["name"])
-    existing_by_partner: dict[int, dict] = {}
-    for po in existing:
-        pid = po["partner_id"][0] if isinstance(po["partner_id"], (list, tuple)) else po["partner_id"]
-        existing_by_partner.setdefault(pid, po)
-
-    mode = "LIVE" if args.live else "DRY-RUN (no writes; use --live to create the draft RFQs)"
-    print(f"\nPurchasing plan — {order['name']}  [{mode}]")
-    print(f"Stock source: {source}")
-    print(f"{len(to_buy)} lines to buy -> {len(by_vendor) - bool(unassigned)} vendor(s) on file, "
-          f"{len(unassigned)} line(s) with no vendor (-> RFQ on {PLACEHOLDER_VENDOR!r}).\n")
-
-    created: list[str] = []
-    for (vid, vname), lines in sorted(by_vendor.items(), key=lambda kv: kv[0][1]):
-        subtotal = sum(l["product_qty"] * l["price_unit"] for l in lines)
-        print(f"── {vname}  ({len(lines)} lines, est. cost {subtotal:,.2f})")
-        for l in lines:
-            note = ""
-            if "_min_qty_note" in l:
-                note = f"   [vendor min qty {fmt(l['_min_qty_note'])} — review]"
-            price = f" @ {l['price_unit']:,.2f}" if l["price_unit"] else " @ cost unknown"
-            print(f"   {l['name']:<32} x {fmt(l['product_qty']):>6}{price}{note}")
-        prior = existing_by_partner.get(vid)
-        if prior:
-            print(f"   -> SKIPPED: {prior['name']} ({prior['state']}) already cites "
-                  f"{order['name']} for this vendor.\n")
-            continue
-        if args.live:
-            rfq_lines = [{k: v for k, v in l.items() if not k.startswith("_")} for l in lines]
-            rfq_id = odoo.create_draft_rfq(vid, order["name"], rfq_lines)
-            rfq_name = odoo.read_field("purchase.order", rfq_id, "name")
-            created.append(f"{rfq_name} ({vname})")
-            print(f"   -> created DRAFT RFQ {rfq_name} (origin: {order['name']}) — "
-                  f"review and send from Odoo.\n")
-        else:
-            print(f"   -> would create 1 draft RFQ (origin: {order['name']}).\n")
-
-    if unassigned:
-        print(f"NOTE: the {PLACEHOLDER_VENDOR!r} RFQ holds the lines with no vendor on file — "
-              "in Odoo change its vendor, or duplicate it per vendor and trim the lines.\n")
+    print(f"\nStock source: {source}")
+    created, unassigned = plan_rfqs(odoo, order["name"], to_buy, args.live)
 
     if args.live and created:
         odoo.post_chatter(order["id"],
                           "<p>Hermes: requisiciones de compra (borrador) creadas para "
-                          "cubrir faltantes de esta orden: " + ", ".join(created) +
+                          "cubrir faltantes de esta orden: " + ", ".join(f"{name} ({vendor})" for _, name, vendor in created) +
                           ". Revisar y enviar desde Compras."
                           + (f" La RFQ de '{PLACEHOLDER_VENDOR}' agrupa partidas sin proveedor: "
                              "cambiar el proveedor o duplicarla por proveedor." if unassigned else "")

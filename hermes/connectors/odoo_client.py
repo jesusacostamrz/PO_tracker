@@ -127,9 +127,9 @@ class OdooClient:
             },
         )
 
-    def post_chatter(self, order_id, body_html: str) -> int:
+    def post_chatter(self, order_id, body_html: str, *, model: str = "sale.order") -> int:
         return self.execute(
-            "sale.order", "message_post", [order_id], body=body_html, message_type="comment"
+            model, "message_post", [order_id], body=body_html, message_type="comment"
         )
 
     def read_field(self, model: str, rid: int, fname: str):

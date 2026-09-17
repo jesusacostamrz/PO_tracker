@@ -32,3 +32,17 @@ Status 2026-09-16: committed (deb0bb8). Offline tests pass. NOT yet run against 
 - Stock workbook is read-only for Hermes (Viewer share is enough).
 - Only draft RFQs are ever written; humans review and send from Odoo Compras.
 - Check: `python scripts/test_shortage.py && python scripts/test_purchasing.py`.
+
+## Email requisitions (2026-09-17)
+
+`scripts/intake_req.py` (VPS unit `hermes-req-intake.service`, `--live --watch 60`):
+an email to pounicontrol@gmail.com whose subject contains the word **REQ** is a
+purchase requisition. Items are extracted from body / xlsx / csv / pdf / image with
+the same LLM parser the RFQ intake uses, matched to the catalog (unknown items are
+auto-created at price 0 with the standard accounts + UNSPSC), and turned into draft
+RFQs per vendor via `plan_rfqs` (shared with `order_purchasing.py`), placeholder
+vendor included. Origin = subject + Gmail msg-id tail (keeps repeated subjects
+distinct). A chatter note on each RFQ cites the sender and subject; the message is
+labeled Hermes/Processed (or NeedsReview when no items could be extracted).
+Known risk: Gmail matches "req" as a whole word, so a PO/RFQ subject like
+"OC 1234 / REQ-2044" is captured as a requisition and hidden from the other pollers.
