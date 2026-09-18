@@ -129,7 +129,8 @@ class OdooClient:
 
     def post_chatter(self, order_id, body_html: str, *, model: str = "sale.order") -> int:
         return self.execute(
-            model, "message_post", [order_id], body=body_html, message_type="comment"
+            model, "message_post", [order_id], body=body_html, message_type="comment",
+            body_is_html=True,  # Odoo 19 escapes a plain-string body (showed literal <p>)
         )
 
     def read_field(self, model: str, rid: int, fname: str):
