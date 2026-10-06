@@ -24,6 +24,9 @@ _TEXT_MIN_CHARS = 120
 _MAX_VISION_PAGES = 4
 # Cap text sent to the model (cheap + plenty for the order pages).
 _MAX_TEXT_CHARS = 15000
+# Output cap only bounds the reply (you pay for tokens generated, not the cap). 2000 truncated an
+# 11-page, many-line PO (PO-295218, 2026-10-06) and the message silently never reached the Tracker.
+_MAX_OUT_TOKENS = 8000
 
 
 def page_texts(pdf_bytes: bytes) -> list[str]:
@@ -129,7 +132,7 @@ def parse_po(pdf_bytes: bytes, llm, company: dict) -> dict:
     # the order itself is only in the images (Volex PO 105381, 2026-09-07).
     if 0 not in scanned:
         text = extract_text(pdf_bytes, pages)
-        result = llm.chat_json(system=system, user="PO text:\n\n" + text[:_MAX_TEXT_CHARS], max_tokens=2000)
+        result = llm.chat_json(system=system, user="PO text:\n\n" + text[:_MAX_TEXT_CHARS], max_tokens=_MAX_OUT_TOKENS)
         result["_source"] = "text"
     else:
         images = render_pages_as_data_urls(pdf_bytes, pages=scanned[:_MAX_VISION_PAGES])
@@ -143,7 +146,7 @@ def parse_po(pdf_bytes: bytes, llm, company: dict) -> dict:
             system=system,
             user_text=user_text,
             image_data_urls=images,
-            max_tokens=2500,
+            max_tokens=_MAX_OUT_TOKENS,
         )
         result["_source"] = "vision"
     return result

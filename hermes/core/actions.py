@@ -101,6 +101,21 @@ def _find_existing(sheets: SheetsClient, orders_tab: str, po_number: str, msg_id
     return None
 
 
+def _other_po_on_quote(sheets: SheetsClient, orders_tab: str, so_name: str, po_number: str) -> str:
+    """PO# of another live Tracker row already matched to ``so_name`` ('' if none).
+
+    A customer can send several POs against one quote (split orders, re-issues). Only
+    the first may auto-match; the rest need a human. Dry-run rows are simulations and
+    don't count; neither does this PO's own prior row.
+    """
+    for r in sheets.read(f"{orders_tab}!B2:S"):  # r[0]=PO#, r[3]=Quote/SO #
+        if len(r) > 3 and r[3] == so_name and r[0] != po_number and not any(
+            (r[j] if len(r) > j else "") == "Dry-run" for j in (11, 12, 13, 14)
+        ):
+            return r[0]
+    return ""
+
+
 def annotate_odoo(
     odoo: OdooClient,
     write: dict,
@@ -215,6 +230,15 @@ def apply_match(
             for row in audit:
                 sheets.append_row(audit_tab, row)
             return out
+
+    if match.status == "matched" and match.quote:
+        other = _other_po_on_quote(sheets, orders_tab, match.quote.get("name", ""), po_number)
+        if other:  # ponytail: any 2nd PO on a quote -> human; no split-PO auto-accounting
+            match = MatchResult(
+                "needs_review", match.confidence,
+                f"Quote {match.quote['name']} already has PO {other} linked — possible split/"
+                f"duplicate PO, needs a human. (Auto-match was: {match.reason})",
+                quote=match.quote)
 
     q = match.quote
     matched = match.status == "matched"

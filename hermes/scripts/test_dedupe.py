@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.actions import _find_existing  # noqa: E402
+from core.actions import _find_existing, _other_po_on_quote  # noqa: E402
 
 
 class FakeSheets:
@@ -44,7 +44,15 @@ def main() -> int:
     dry = FakeSheets([_row("PO-333", "msg-B", ref="Dry-run")])
     assert _find_existing(dry, "Orders", "PO-333", "") == (2, True)
 
-    print("test_dedupe: OK (5 cases)")
+    # 2nd PO on a quote already linked to another live PO -> flagged
+    q = _row("PO-1", "m1"); q[3] = "S03354"
+    assert _other_po_on_quote(FakeSheets([q]), "Orders", "S03354", "PO-2") == "PO-1"
+    assert _other_po_on_quote(FakeSheets([q]), "Orders", "S03354", "PO-1") == ""   # own row
+    assert _other_po_on_quote(FakeSheets([q]), "Orders", "S09999", "PO-2") == ""   # other quote
+    qd = _row("PO-1", "m1", ref="Dry-run"); qd[3] = "S03354"
+    assert _other_po_on_quote(FakeSheets([qd]), "Orders", "S03354", "PO-2") == ""  # dry-run ignored
+
+    print("test_dedupe: OK (9 cases)")
     return 0
 
 
