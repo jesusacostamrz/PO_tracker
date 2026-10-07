@@ -211,6 +211,15 @@ def apply_match(
     run_mode = "dry-run" if dry else "live"
 
     po_number = (po.get("po_number") or "").strip()
+    if match.status == "matched" and match.quote:
+        other = _other_po_on_quote(sheets, orders_tab, match.quote.get("name", ""), po_number)
+        if other:  # ponytail: any 2nd PO on a quote -> human; no split-PO auto-accounting
+            # Mutate in place BEFORE the status label is derived, so the Tracker row,
+            # the Gmail labeling in intake.py and the Odoo-write gate all see needs_review.
+            match.reason = (f"Quote {match.quote['name']} already has PO {other} linked — possible "
+                            f"split/duplicate PO, needs a human. (Auto-match was: {match.reason})")
+            match.status = "needs_review"
+
     status = _STATUS_LABEL.get(match.status, "Needs Review")
     out = ActionOutcome(dry_run=dry, status=status)
     audit: list[list] = []
@@ -230,15 +239,6 @@ def apply_match(
             for row in audit:
                 sheets.append_row(audit_tab, row)
             return out
-
-    if match.status == "matched" and match.quote:
-        other = _other_po_on_quote(sheets, orders_tab, match.quote.get("name", ""), po_number)
-        if other:  # ponytail: any 2nd PO on a quote -> human; no split-PO auto-accounting
-            match = MatchResult(
-                "needs_review", match.confidence,
-                f"Quote {match.quote['name']} already has PO {other} linked — possible split/"
-                f"duplicate PO, needs a human. (Auto-match was: {match.reason})",
-                quote=match.quote)
 
     q = match.quote
     matched = match.status == "matched"

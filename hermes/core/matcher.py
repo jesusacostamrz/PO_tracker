@@ -69,6 +69,23 @@ def _amount_close(po_amount, q_amount) -> tuple[float, float]:
     return max(0.0, 1.0 - min(diff_pct / 10.0, 1.0)), diff_pct
 
 
+def _split_gap(po_amount, q_amount, matching: dict) -> float:
+    """% by which the PO total falls BELOW the quote total when that exceeds
+    matching.split_gap_pct (default 50), else 0. A PO covering a fraction of a quote is
+    probably one of several POs split from it -> human review (rule 2026-10-07)."""
+    limit = float(matching.get("split_gap_pct", 50))
+    if not po_amount or not q_amount or po_amount >= q_amount:
+        return 0.0
+    gap = (q_amount - po_amount) / q_amount * 100.0
+    return gap if gap > limit else 0.0
+
+
+def _split_review(q: dict, gap: float) -> MatchResult:
+    return MatchResult("needs_review", 0.60,
+        f"PO total is {gap:.1f}% below quote {q['name']} — likely a split/partial PO, needs a human.",
+        quote=q, candidates=[q])
+
+
 def match_po(po: dict, quotes: list[dict], matching: dict) -> MatchResult:
     tol = float(matching.get("amount_tolerance_pct", 0.5))
     threshold = float(matching.get("confidence_threshold", 0.85))
@@ -84,6 +101,9 @@ def match_po(po: dict, quotes: list[dict], matching: dict) -> MatchResult:
     if ref:
         for q, _ in cands:
             if (q.get("name") or "").strip().lower() == ref:
+                gap = _split_gap(amount, q.get("amount_untaxed"), matching)
+                if gap:
+                    return _split_review(q, gap)
                 return MatchResult("matched", 0.97, f"PO cites our quote {q['name']} directly.", quote=q)
 
     if not cands:
@@ -111,6 +131,10 @@ def match_po(po: dict, quotes: list[dict], matching: dict) -> MatchResult:
         return MatchResult("needs_review", min(score, 0.60),
             f"Two quotes score nearly the same ({q['name']} vs {runner[0]['name']}) — ambiguous, needs a human.",
             quote=q, candidates=[t[0] for t in scored[:5]])
+
+    gap = _split_gap(amount, q.get("amount_untaxed"), matching)
+    if gap:
+        return _split_review(q, gap)
 
     if score >= threshold:
         return MatchResult("matched", score,
