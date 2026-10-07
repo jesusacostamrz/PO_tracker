@@ -209,6 +209,7 @@ assert parse_command("@Unicontrolbot req") == (None, False)
 assert parse_command("Unicontrolbot: requisición SKS") == ("SKS", False)
 cmd = parse_command("@Unicontrolbot req --shortage Bluestar")
 assert cmd is not None and cmd[1] is True and cmd[0] == "Bluestar"
+assert parse_command("@Unicontrolbot @antonio.acosta req SKS") == ("SKS", False)  # 2nd mention in between
 assert parse_command("Has sido asignado a esta tarea por Juan") is None
 print("test_requisition (f) mention regex: OK")
 

@@ -30,9 +30,10 @@ from connectors.odoo_client import OdooClient, OdooError         # noqa: E402
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
-# anywhere in the note: "@antonio.acosta @Unicontrolbot req sks" is a command too
+# anywhere in the note: "@antonio.acosta @Unicontrolbot req sks" is a command too, and so is
+# "@Unicontrolbot @antonio.acosta req SKS" (other @mentions may sit between bot and verb)
 _CMD_RE = re.compile(
-    r"@?unicontrolbot[,:]?\s*(req|requisici[oó]n)\b\s*(?:--shortage\s*)?(.*)$", re.I)
+    r"@?unicontrolbot[,:]?\s*(?:@[\w.\-]+[,:]?\s*)*(req|requisici[oó]n)\b\s*(?:--shortage\s*)?(.*)$", re.I)
 
 
 def _plain(body_html: str) -> str:
