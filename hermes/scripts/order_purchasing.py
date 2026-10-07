@@ -35,19 +35,24 @@ PLACEHOLDER_VENDOR = "Sin proveedor (asignar)"
 
 
 def cluster(to_buy: list[dict], tmpl_map: dict[int, int],
-            sinfo: dict[int, dict]) -> tuple[dict, list[dict]]:
+            sinfo: dict[int, dict], vendor: tuple[int, str] | None = None) -> tuple[dict, list[dict]]:
     """Split shortage rows into ({(vendor_id, vendor_name): [rfq line]}, unassigned).
-    RFQ line qty is the shortage; price is our last known cost for that vendor."""
+    RFQ line qty is the shortage; price is the row's own ``cost`` when the source
+    (a REQ email quoting supplier prices) gave one, else our last known cost for
+    that vendor. ``vendor`` forces every line onto that one vendor (email named it)."""
     by_vendor: dict[tuple[int, str], list[dict]] = {}
     unassigned: list[dict] = []
     for r in to_buy:
-        si = sinfo.get(tmpl_map.get(r["product_id"]))
-        if not si or not si.get("partner_id"):
+        si = sinfo.get(tmpl_map.get(r["product_id"])) or {}
+        if vendor:
+            vid, vname = vendor
+        elif si.get("partner_id"):
+            vid, vname = si["partner_id"][0], si["partner_id"][1]
+        else:
             unassigned.append(r)
             continue
-        vid, vname = si["partner_id"][0], si["partner_id"][1]
-        line = {"product_id": r["product_id"], "name": r["part"],
-                "product_qty": r["buy"], "price_unit": float(si.get("price") or 0.0)}
+        line = {"product_id": r["product_id"], "name": r["part"], "product_qty": r["buy"],
+                "price_unit": float(r.get("cost") or si.get("price") or 0.0)}
         min_qty = float(si.get("min_qty") or 0.0)
         if min_qty > r["buy"]:
             line["_min_qty_note"] = min_qty  # surfaced in the report; human decides
@@ -55,13 +60,15 @@ def cluster(to_buy: list[dict], tmpl_map: dict[int, int],
     return by_vendor, unassigned
 
 
-def plan_rfqs(odoo, origin: str, to_buy: list[dict], live: bool,
-              out=print) -> tuple[list[tuple[int, str, str]], bool]:
+def plan_rfqs(odoo, origin: str, to_buy: list[dict], live: bool, out=print,
+              vendor: tuple[int, str] | None = None,
+              currency: str | None = None) -> tuple[list[tuple[int, str, str]], bool]:
     """Plan vendor drafts. Returns (created (id, name, vendor) tuples — none in
-    dry-run, whether any line had no vendor on file)."""
+    dry-run, whether any line had no vendor on file). ``vendor``/``currency``
+    come from a REQ email that names the supplier and quotes its prices."""
     tmpl_map = odoo.product_tmpl_map([r["product_id"] for r in to_buy if r["product_id"]])
     sinfo = odoo.supplierinfo_by_tmpl(set(tmpl_map.values()))
-    by_vendor, unassigned = cluster(to_buy, tmpl_map, sinfo)
+    by_vendor, unassigned = cluster(to_buy, tmpl_map, sinfo, vendor)
     if unassigned:
         # Lines with no vendor on file go into ONE draft RFQ on a placeholder
         # vendor: purchasing reassigns the partner (or duplicates the RFQ to
@@ -78,7 +85,7 @@ def plan_rfqs(odoo, origin: str, to_buy: list[dict], live: bool,
         existing_by_partner.setdefault(pid, po)
 
     mode = "LIVE" if live else "DRY-RUN (no writes; use --live to create the draft RFQs)"
-    out(f"\nPurchasing plan — {origin}  [{mode}]")
+    out(f"\nPurchasing plan — {origin}  [{mode}]" + (f"  currency {currency}" if currency else ""))
     out(f"{len(to_buy)} lines to buy -> {len(by_vendor) - bool(unassigned)} vendor(s) on file, "
           f"{len(unassigned)} line(s) with no vendor (-> RFQ on {PLACEHOLDER_VENDOR!r}).\n")
 
@@ -99,7 +106,7 @@ def plan_rfqs(odoo, origin: str, to_buy: list[dict], live: bool,
             continue
         if live:
             rfq_lines = [{k: v for k, v in l.items() if not k.startswith("_")} for l in lines]
-            rfq_id = odoo.create_draft_rfq(vid, origin, rfq_lines)
+            rfq_id = odoo.create_draft_rfq(vid, origin, rfq_lines, currency=currency)
             rfq_name = odoo.read_field("purchase.order", rfq_id, "name")
             created.append((rfq_id, rfq_name, vname))
             out(f"   -> created DRAFT RFQ {rfq_name} (origin: {origin}) — "

@@ -114,14 +114,14 @@ class OdooClient:
     def set_client_order_ref(self, order_id, po_number: str) -> bool:
         return self.execute("sale.order", "write", [order_id], {"client_order_ref": po_number})
 
-    def attach_pdf(self, order_id, filename: str, pdf_bytes: bytes) -> int:
+    def attach_pdf(self, order_id, filename: str, pdf_bytes: bytes, *, model: str = "sale.order") -> int:
         return self.execute(
             "ir.attachment",
             "create",
             {
                 "name": filename,
                 "datas": base64.b64encode(pdf_bytes).decode("ascii"),
-                "res_model": "sale.order",
+                "res_model": model,
                 "res_id": order_id,
                 "mimetype": "application/pdf",
             },
@@ -268,16 +268,24 @@ class OdooClient:
                                 [["origin", "=", origin], ["state", "!=", "cancel"]],
                                 ["name", "partner_id", "state"])
 
-    def create_draft_rfq(self, partner_id: int, origin: str, lines: list[dict]) -> int:
+    def create_draft_rfq(self, partner_id: int, origin: str, lines: list[dict],
+                         currency: str | None = None) -> int:
         """Create a DRAFT purchase.order (an Odoo 'Request for Quotation').
-        ``origin`` links it to the customer SO as the Source Document.
-        Never confirms it and never sends it to the vendor."""
-        return self.execute("purchase.order", "create", {
+        ``origin`` links it to the customer SO as the Source Document. ``currency``
+        (ISO code) sets the RFQ currency when the supplier quoted in one; unknown
+        codes fall back to the vendor/company default. Never confirms it and never
+        sends it to the vendor."""
+        vals = {
             "partner_id": partner_id,
             "user_id": self.uid,  # Compradora (Buyer) = Unicontrolbot, the API user
             "origin": origin,
             "order_line": [(0, 0, l) for l in lines],
-        })
+        }
+        if currency:
+            cur = self.search_read("res.currency", [["name", "=", currency]], ["id"], limit=1)
+            if cur:
+                vals["currency_id"] = cur[0]["id"]
+        return self.execute("purchase.order", "create", vals)
 
     # ---- factory ----
     @classmethod

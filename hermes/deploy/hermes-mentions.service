@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes - Odoo mention intake (chatter @Unicontrolbot req)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hermes-po
+ExecStart=/opt/hermes-po/.venv/bin/python scripts/intake_mentions.py --live --watch 60
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

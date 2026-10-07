@@ -73,6 +73,8 @@ req:
   labels:
     processed: Hermes/Processed
     needs_review: Hermes/NeedsReview
+  # intake_mentions.py watermark (last processed mail.message id), relative to hermes/.
+  mentions_state: ".state/mentions.json"
 
 llm:
   # provider-agnostic: OpenAI SDK + base_url. Works for OpenAI or GLM/Zhipu.

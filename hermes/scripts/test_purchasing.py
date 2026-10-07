@@ -32,3 +32,19 @@ assert brady["_min_qty_note"] == 10.0            # below vendor minimum -> flagg
 assert [r["part"] for r in unassigned] == ["ZZ-9", "XX-1"]
 
 print("test_purchasing: OK")
+
+# REQ email named the vendor and quoted its prices: every line lands on that
+# vendor at the email's cost (supplierinfo price/vendor ignored, nothing unassigned).
+forced, none = cluster([dict(r, cost=c) for r, c in zip(to_buy, [8.75, 13.75, 0, 41.25, 0])],
+                       tmpl_map, sinfo, vendor=(77, "Bluestar"))
+assert none == [] and set(forced) == {(77, "Bluestar")}
+bl = forced[(77, "Bluestar")]
+assert [l["price_unit"] for l in bl] == [8.75, 13.75, 40.0, 41.25, 0.0], bl  # no cost -> last known -> 0
+assert "_min_qty_note" in bl[2]
+
+from scripts.intake_req import _REQ_SUBJ  # noqa: E402
+assert _REQ_SUBJ.match("req bluestar").group(1) == "bluestar"
+assert _REQ_SUBJ.match("RE: Fwd: REQ - Zebra Technologies ").group(1) == "Zebra Technologies"
+assert _REQ_SUBJ.match("Fw: Purchase Order 9501397761") is None
+assert _REQ_SUBJ.match("request for quote abc") is None
+print("test_purchasing (REQ vendor/cost): OK")

@@ -10,6 +10,7 @@ Usage: python scripts/intake_req.py [--live] [--odoo-db NAME] [--max N] [--watch
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from html import escape
@@ -21,11 +22,29 @@ from core.config import load_config                    # noqa: E402
 from core.rfq_parser import parse_rfq                  # noqa: E402
 from core.product_matcher import match_lines           # noqa: E402
 from core.quote_actions import _trusted, _create_missing_products, set_unspsc  # noqa: E402
+from core.requisition import resolve_vendor, from_sales_order  # noqa: E402
 from connectors.llm_client import LLMClient            # noqa: E402
 from connectors.gmail_client import GmailClient, GmailError      # noqa: E402
 from connectors.odoo_client import OdooClient, OdooError         # noqa: E402
 from scripts.intake_rfq import _sources_from_message   # noqa: E402
 from scripts.order_purchasing import plan_rfqs          # noqa: E402
+
+
+# The shared RFQ parser reads the message as a customer request; this hint flips it:
+# the named party is the SUPPLIER and the prices are what we PAY.
+_REQ_HINT = (
+    "PURCHASE REQUISITION, not a customer RFQ — use SUPPLIER-QUOTE MODE for this message: "
+    "customer_name = the SUPPLIER we will buy from (subject 'REQ <supplier>' or body "
+    "'requisition for <supplier>'); each line's unit_cost = OUR purchase price (the "
+    "partner/dealer/net price to us, NOT the list price) with cost_currency/currency as "
+    "shown ($ on a US vendor's table = USD); quantity as stated, else 1."
+)
+_REQ_SUBJ = re.compile(r"^\s*(?:(?:re|fw|fwd)\s*:\s*)*req\b[\s:\-]*(.+?)\s*$", re.I)
+# Requisition FROM a Sales Order: "REQ S03241 <optional vendor>". Checked BEFORE
+# _REQ_SUBJ so an SO-style subject routes to from_sales_order instead of the
+# generic email-attachment path.
+_REQ_SO_SUBJ = re.compile(r"^\s*(?:(?:re|fw|fwd)\s*:\s*)*req\s+(S\d{4,6})\b(.*)$", re.I)
+_resolve_vendor = resolve_vendor  # ponytail: kept as a local alias, callers below use this name
 
 
 def _process_message(gm, odoo, cfg, llm, products, msg_id, dry, mark_read, lines_out):
@@ -34,10 +53,32 @@ def _process_message(gm, odoo, cfg, llm, products, msg_id, dry, mark_read, lines
     subj_full = gm.headers(full).get("subject") or "(no subject)"
     subj = subj_full[:50]
 
+    m_so = _REQ_SO_SUBJ.match(subj_full)
+    if m_so:
+        so_name, rest = m_so.group(1).upper(), m_so.group(2).strip()
+        pdfs = gm.attachments_by_ext(full, (".pdf",))
+        try:
+            created = from_sales_order(odoo, llm, cfg, so_name, vendor_hint=(rest or None),
+                                       extra_sources=pdfs, live=not dry, out=lines_out.append)
+        except RuntimeError as exc:
+            if not dry:
+                gm.apply_label(msg_id, labels["needs_review"], mark_read=mark_read)
+            lines_out.append(f"  [{'SIM' if dry else 'NeedsReview'}] {subj} — {exc}")
+            return
+        if not dry:
+            gm.apply_label(msg_id, labels["processed"], mark_read=mark_read)
+        tag = "SIM" if dry else "Processed"
+        lines_out.append(f"  [{tag}] {subj} — {len(created)} draft RFQ(s) created from {so_name}")
+        return
+
     sources = _sources_from_message(gm, full)
     sources.insert(0, ("text", "email-subject", f"EMAIL SUBJECT: {subj_full}"))
+    sources.insert(0, ("text", "req-instructions", _REQ_HINT))
 
     rfq = parse_rfq(sources, llm, cfg.get("company", {}))
+    m_subj = _REQ_SUBJ.match(subj_full)
+    vendor = _resolve_vendor(odoo, (m_subj.group(1) if m_subj else None) or rfq.get("customer_name"), not dry)
+    lines_out.append(f"  vendor: {vendor[1] if vendor else '(none named -> supplierinfo / placeholder)'}")
     if not rfq["line_items"]:
         if not dry:
             gm.apply_label(msg_id, labels["needs_review"], mark_read=mark_read)
@@ -65,13 +106,18 @@ def _process_message(gm, odoo, cfg, llm, products, msg_id, dry, mark_read, lines
                 audit("unspsc", f"{type(exc).__name__}: {exc}", "error")
         products.extend({"id": pid, "name": name, "list_price": 0.0}
                         for pid, name, *_ in created_products)  # reusable within this batch
-    to_buy = [{"product_id": m.product["id"], "part": m.product["name"], "buy": m.line["quantity"]}
-              for m in matches]
+    to_buy = [{"product_id": m.product["id"], "part": m.product["name"], "buy": m.line["quantity"],
+               "cost": m.line.get("unit_cost") or 0.0} for m in matches]
+    # ponytail: one currency per RFQ — the first line's own code, else the document's.
+    # A supplier table mixing USD and MXN lines would need one RFQ per currency.
+    currency = next((m.line.get("cost_currency") for m in matches if m.line.get("cost_currency")),
+                    None) or rfq.get("currency")
 
     # ponytail: Gmail msg-id tail keeps the origin unique — the per-vendor SKIP in
     # plan_rfqs keys on origin, and requisition subjects repeat ("REQ semanal")
     origin = f"{subj_full.strip()[:48]} #{msg_id[-6:]}"
-    created, _ = plan_rfqs(odoo, origin, to_buy, live=not dry, out=lines_out.append)
+    created, _ = plan_rfqs(odoo, origin, to_buy, live=not dry, out=lines_out.append,
+                           vendor=vendor, currency=currency)
     if not dry:
         sender = gm.headers(full).get("from") or "(sin remitente)"
         for rfq_id, _, _ in created:

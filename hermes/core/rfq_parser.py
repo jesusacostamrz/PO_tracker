@@ -40,6 +40,7 @@ def _system_prompt(company: dict) -> str:
 Return ONLY a JSON object (null where absent):
 {{
   "customer_name": string,   // the requesting company, if identifiable; else null
+  "supplier_name": string,   // SUPPLIER-QUOTE MODE only: the company that ISSUED the quotation (its letterhead); else null
   "rfq_ref": string,         // the customer's RFQ/requisition number, if any; else null
   "margin_pct": number,      // profit margin % EXPLICITLY instructed in the email body (e.g. "add 40%"); else null
   "discount_pct": number,    // customer discount % EXPLICITLY granted in the email body ("apply 10% discount", "con 10% de descuento"); else null
@@ -219,6 +220,8 @@ def parse_rfq(sources: list[tuple[str, str, bytes | str]], llm, company: dict) -
         except (TypeError, ValueError):
             return None
 
+    result["customer_name"] = result.get("customer_name") or None
+    result["supplier_name"] = result.get("supplier_name") or None
     result["margin_pct"] = _f(result.get("margin_pct"))
     result["discount_pct"] = _f(result.get("discount_pct"))
     result["price_source_site"] = _domain(result.get("price_source_site"))
